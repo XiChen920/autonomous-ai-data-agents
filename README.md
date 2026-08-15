@@ -5,6 +5,26 @@
 This project implements a two-agent data analysis system for SQLite databases.
 Users can control the system through either a Streamlit UI or a CLI.
 
+Start the Streamlit UI:
+
+```powershell
+cd C:\Users\win11\PycharmProjects\autonomous-ai-data-agents
+venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+Then open:
+
+```text
+http://localhost:8501
+```
+
+Run the CLI:
+
+```powershell
+cd C:\Users\win11\PycharmProjects\autonomous-ai-data-agents
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --offline --limit 5
+```
+
 The system contains two main agents:
 
 1. Data Analysis Agent
@@ -28,7 +48,7 @@ The project is designed around controllability, user restrictions, simple databa
 | --- | --- |
 | Two distinct AI agents | `DataAnalysisAgent` and `DataVisualizationAgent` |
 | Agents connected | `AgentOrchestrator` runs analysis first, then visualization |
-| Simple UI or CLI | Streamlit UI in `src/ui/streamlit_app.py`; CLI in `app.py` |
+| Simple UI or CLI | Streamlit UI launched by `streamlit_app.py`; CLI launched by `cli_app.py` |
 | User controllability | Users choose database, question, mode, chart type, row limit, and preview rows |
 | User restriction | `config/users.yaml` limits which databases each user can access |
 | Easy integration | New databases can be added through `config/databases.yaml` |
@@ -56,7 +76,9 @@ User: Streamlit UI or CLI
 
 ```text
 autonomous-ai-data-agents/
-  app.py
+  cli_app.py
+  streamlit_app.py
+  openai_diagnostics.py
   README.md
   requirements.txt
   .env.example
@@ -78,6 +100,9 @@ autonomous-ai-data-agents/
       visualization_agent.py
       orchestrator.py
 
+    cli/
+      cli_app.py
+
     auth/
       access_control.py
 
@@ -89,6 +114,9 @@ autonomous-ai-data-agents/
 
     ui/
       streamlit_app.py
+
+    tools/
+      openai_diagnostics.py
 
     utils/
       config_loader.py
@@ -177,7 +205,7 @@ Start the app:
 
 ```powershell
 cd C:\Users\win11\PycharmProjects\autonomous-ai-data-agents
-venv\Scripts\python.exe -m streamlit run src\ui\streamlit_app.py
+venv\Scripts\python.exe -m streamlit run streamlit_app.py
 ```
 
 Then open:
@@ -294,19 +322,19 @@ The system queries up to 50 rows, but the UI preview shows 10.
 Run a stable offline demo:
 
 ```powershell
-venv\Scripts\python.exe app.py --user alice --db chinook --question "Show total sales by country" --offline --limit 5
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --offline --limit 5
 ```
 
 Run online OpenAI mode:
 
 ```powershell
-venv\Scripts\python.exe app.py --user alice --db chinook --question "Which countries have the highest average invoice value?" --limit 10
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Which countries have the highest average invoice value?" --limit 10
 ```
 
 Test access denial:
 
 ```powershell
-venv\Scripts\python.exe app.py --user bob --db chinook --question "Show total sales by country" --offline
+venv\Scripts\python.exe cli_app.py --user bob --db chinook --question "Show total sales by country" --offline
 ```
 
 Expected result:
@@ -324,16 +352,22 @@ OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL=gpt-5-mini
 ```
 
-Check available models:
+Run OpenAI diagnostics:
 
 ```powershell
-venv\Scripts\python.exe list_models.py
+venv\Scripts\python.exe openai_diagnostics.py
 ```
 
-Test the API key:
+Only list available models:
 
 ```powershell
-venv\Scripts\python.exe test_api_key.py
+venv\Scripts\python.exe openai_diagnostics.py --list-models
+```
+
+Only check whether the configured model can respond:
+
+```powershell
+venv\Scripts\python.exe openai_diagnostics.py --check-completion
 ```
 
 ## 10. Testing
@@ -347,7 +381,7 @@ venv\Scripts\python.exe -m pytest -q
 Current expected result:
 
 ```text
-14 passed
+15 passed
 ```
 
 The tests cover:
@@ -440,13 +474,13 @@ If Streamlit asks for an email on first launch, press Enter to skip it.
 If `localhost:8501` is blank, stop the server with `Ctrl + C` and restart:
 
 ```powershell
-venv\Scripts\python.exe -m streamlit run src\ui\streamlit_app.py
+venv\Scripts\python.exe -m streamlit run streamlit_app.py
 ```
 
 If port 8501 is busy:
 
 ```powershell
-venv\Scripts\python.exe -m streamlit run src\ui\streamlit_app.py --server.port 8502
+venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.port 8502
 ```
 
 If online mode fails, switch to `Offline fallback` for a stable demo.
@@ -454,7 +488,7 @@ If online mode fails, switch to `Offline fallback` for a stable demo.
 If a model access error appears, run:
 
 ```powershell
-venv\Scripts\python.exe list_models.py
+venv\Scripts\python.exe openai_diagnostics.py --list-models
 ```
 
 Then update `OPENAI_MODEL` in `.env`.

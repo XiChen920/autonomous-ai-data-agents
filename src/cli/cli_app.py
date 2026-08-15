@@ -1,11 +1,17 @@
-"""Command-line entry point for running the full two-agent pipeline.
+"""Command-line interface implementation for the two-agent pipeline.
 
-The CLI exposes the same controls as the Streamlit UI: user, database, natural
-language question, row limit, chart type, and online/offline execution mode.
+This module contains the real CLI logic. The root-level ``cli_app.py`` file is
+only a small launcher so users can run the project from the repository root.
 """
 
 import argparse
 import sys
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agents.analysis_agent import AnalysisAgentError, DataAnalysisAgent
 from src.agents.orchestrator import AgentOrchestrator
@@ -34,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--offline",
         action="store_true",
-        help="Use built-in SQL templates instead of the OpenAI API",
+        help="Use built-in sample-question SQL templates instead of the OpenAI API",
     )
     parser.add_argument(
         "--preview-rows",
@@ -109,3 +115,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
