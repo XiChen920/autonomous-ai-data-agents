@@ -1,0 +1,30 @@
+# Python virtual environments
+.venv/
+venv/
+
+# IDE/editor local files
+.idea/
+.vscode/
+
+# Local secrets
+.env
+
+# Python/test caches
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Local OS/cache files
+.DS_Store
+Thumbs.db
+
+# Generated analysis outputs
+outputs/charts/
+outputs/reports/
+
+# SQLite temporary files
+*.db-journal
+*.sqlite-journal
+
+# Local Streamlit settings
+.streamlit/

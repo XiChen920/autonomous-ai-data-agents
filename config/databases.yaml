@@ -1,0 +1,15 @@
+# Database registry used by the router.
+# Add new SQLite databases here by giving each one a logical name, file path,
+# and short description for the UI.
+databases:
+  chinook:
+    path: data/chinook.db
+    description: Music store sample database
+
+  northwind:
+    path: data/northwind_small.sqlite
+    description: Sales and orders sample database
+
+  sakila:
+    path: data/sakila.db
+    description: DVD rental sample database

@@ -1,0 +1,10 @@
+# Company visualization style.
+# The Data Visualization Agent applies these settings to generated charts.
+company_style:
+  primary_color: "#1F77B4"
+  secondary_color: "#FF7F0E"
+  background_color: "#FFFFFF"
+  grid_color: "#D9E2EC"
+  font_family: "Arial"
+  chart_width: 900
+  chart_height: 500
