@@ -16,7 +16,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.agents.analysis_agent import AnalysisAgentError, DataAnalysisAgent
+from src.agents.analysis_agent import (
+    AnalysisAgentError,
+    DataAnalysisAgent,
+    is_supported_fallback_question,
+)
 from src.agents.orchestrator import AgentOrchestrator
 from src.agents.visualization_agent import DataVisualizationAgent
 from src.auth.access_control import (
@@ -120,11 +124,6 @@ def sync_example_from_question() -> None:
         st.session_state["selected_example"] = CUSTOM_QUESTION_LABEL
     elif selected != CUSTOM_QUESTION_LABEL and question_text != selected:
         st.session_state["selected_example"] = CUSTOM_QUESTION_LABEL
-
-
-def is_sample_question(question: str, examples: list[str]) -> bool:
-    normalized_question = question.strip()
-    return normalized_question in {example.strip() for example in examples}
 
 
 def apply_page_style() -> None:
@@ -300,19 +299,61 @@ def render_all_done() -> None:
     )
 
 
+def analysis_working_step(use_openai: bool | None = None, sql_source: str | None = None) -> tuple[str, str]:
+    if use_openai is False or sql_source == "fallback":
+        return (
+            "Data Analysis Agent: offline analysis working",
+            "Checking user access, reading database schema, matching the sample question to an offline SQL template, validating SQL safety, and querying SQLite.",
+        )
+
+    if use_openai is True and not os.getenv("OPENAI_API_KEY"):
+        return (
+            "Data Analysis Agent: fallback analysis working",
+            "Checking user access and reading database schema. OPENAI_API_KEY is missing, so the agent will use the offline sample-question template.",
+        )
+
+    return (
+        "Data Analysis Agent: online analysis working",
+        "Checking user access, reading database schema, asking OpenAI to generate SQL, validating SQL safety, and querying SQLite.",
+    )
+
+
+def analysis_done_step(analysis) -> tuple[str, str]:
+    if analysis.sql_source == "openai":
+        return (
+            "Data Analysis Agent: online analysis done",
+            f"Generated SQL with OpenAI, validated it, queried SQLite, and returned {analysis.row_count} rows.",
+        )
+
+    if analysis.sql_source == "fallback":
+        return (
+            "Data Analysis Agent: offline analysis done",
+            f"Matched the question to a predefined SQL template, validated it, queried SQLite, and returned {analysis.row_count} rows.",
+        )
+
+    return (
+        "Data Analysis Agent: analysis task done",
+        f"Returned {analysis.row_count} rows using {analysis.sql_source} SQL.",
+    )
+
+
 def render_agent_history(analysis, visualization) -> None:
     with st.status(
         "Both agents finished the analysis workflow",
         state="complete",
         expanded=True,
     ):
+        analysis_working_title, analysis_working_body = analysis_working_step(
+            sql_source=analysis.sql_source
+        )
+        analysis_done_title, analysis_done_body = analysis_done_step(analysis)
         render_agent_step(
-            "Data Analysis Agent: working",
-            "Checking user access, reading database schema, generating SQL, validating SQL safety, and querying SQLite.",
+            analysis_working_title,
+            analysis_working_body,
         )
         render_agent_step(
-            "Data Analysis Agent: analysis task done",
-            f"Returned {analysis.row_count} rows using {analysis.sql_source} SQL.",
+            analysis_done_title,
+            analysis_done_body,
             done=True,
         )
         render_agent_step(
@@ -470,13 +511,13 @@ def main() -> None:
     offline_custom_question = (
         not use_openai
         and bool(current_question)
-        and not is_sample_question(current_question, examples)
+        and not is_supported_fallback_question(database, current_question)
     )
 
     if offline_custom_question and not result_locked:
         st.warning(
-            "Offline fallback only supports predefined sample questions. "
-            "Please choose one from Example question, or switch Mode to Online OpenAI for custom questions."
+            "Offline fallback only supports predefined analysis sample questions. "
+            "Please choose a supported analysis sample, or switch Mode to Online OpenAI for custom questions."
         )
 
     if result_locked:
@@ -510,10 +551,10 @@ def main() -> None:
         st.error("Question is required.")
         return
 
-    if not use_openai and not is_sample_question(question, examples):
+    if not use_openai and not is_supported_fallback_question(database, question):
         st.error(
-            "Offline fallback only supports predefined sample questions. "
-            "Please choose one from Example question, or switch Mode to Online OpenAI for custom questions."
+            "Offline fallback only supports predefined analysis sample questions. "
+            "Please choose a supported analysis sample, or switch Mode to Online OpenAI for custom questions."
         )
         return
 
@@ -524,9 +565,12 @@ def main() -> None:
 
     try:
         with st.status("Running agents...", expanded=True) as agent_status:
+            analysis_working_title, analysis_working_body = analysis_working_step(
+                use_openai=use_openai
+            )
             render_agent_step(
-                "Data Analysis Agent: working",
-                "Checking user access, reading database schema, generating SQL, validating SQL safety, and querying SQLite.",
+                analysis_working_title,
+                analysis_working_body,
             )
             result = orchestrator.run_analysis(
                 user=user,
@@ -534,9 +578,10 @@ def main() -> None:
                 question=question,
             )
             analysis = result.analysis
+            analysis_done_title, analysis_done_body = analysis_done_step(analysis)
             render_agent_step(
-                "Data Analysis Agent: analysis task done",
-                f"Returned {analysis.row_count} rows using {analysis.sql_source} SQL.",
+                analysis_done_title,
+                analysis_done_body,
                 done=True,
             )
 

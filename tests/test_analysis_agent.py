@@ -6,6 +6,7 @@ from src.agents.analysis_agent import (
     DataAnalysisAgent,
     InvalidAnalysisQuestionError,
     SQLGenerationError,
+    is_supported_fallback_question,
 )
 from src.agents.orchestrator import AgentOrchestrator
 from src.auth.access_control import AccessDeniedError
@@ -77,6 +78,21 @@ def test_analysis_agent_offline_rejects_custom_question_without_sample_template(
             database_path=registry.resolve_path("chinook"),
             database_name="chinook",
             question="Show total sales by city",
+        )
+
+
+def test_analysis_agent_offline_requires_exact_sample_question() -> None:
+    registry = DatabaseRegistry()
+    agent = DataAnalysisAgent(row_limit=3, use_openai=False)
+
+    assert is_supported_fallback_question("chinook", "Show total sales by country")
+    assert not is_supported_fallback_question("chinook", "Show country total sales")
+
+    with pytest.raises(SQLGenerationError):
+        agent.analyze(
+            database_path=registry.resolve_path("chinook"),
+            database_name="chinook",
+            question="Show country total sales",
         )
 
 

@@ -1,8 +1,8 @@
 """Data Analysis Agent.
 
 This agent validates whether a question is relevant to the selected database,
-generates SQL through OpenAI or offline fallback templates, checks SQL safety,
-executes the query, and returns a structured analysis result.
+generates SQL through OpenAI or exact offline sample-question templates, checks
+SQL safety, executes the query, and returns a structured analysis result.
 """
 
 import os
@@ -21,32 +21,164 @@ from src.db.sql_guard import ensure_limit
 
 SQLGenerator = Callable[[str, str, str], str]
 
-FALLBACK_SAMPLE_QUESTIONS = {
+FALLBACK_SQL_TEMPLATES = {
     "chinook": {
-        "show total sales by country",
-        "show invoice count by country",
-        "show artist sales ranking",
-        "show top genres by track count",
-        "show customer count by country",
-        "show monthly sales trend",
+        "show total sales by country": """
+            SELECT BillingCountry AS country, ROUND(SUM(Total), 2) AS total_sales
+            FROM invoices
+            GROUP BY BillingCountry
+            ORDER BY total_sales DESC
+        """,
+        "show invoice count by country": """
+            SELECT BillingCountry AS country, COUNT(*) AS invoice_count
+            FROM invoices
+            GROUP BY BillingCountry
+            ORDER BY invoice_count DESC
+        """,
+        "show artist sales ranking": """
+            SELECT artists.Name AS artist, ROUND(SUM(invoice_items.UnitPrice * invoice_items.Quantity), 2) AS total_sales
+            FROM artists
+            JOIN albums ON artists.ArtistId = albums.ArtistId
+            JOIN tracks ON albums.AlbumId = tracks.AlbumId
+            JOIN invoice_items ON tracks.TrackId = invoice_items.TrackId
+            GROUP BY artists.Name
+            ORDER BY total_sales DESC
+        """,
+        "show top genres by track count": """
+            SELECT genres.Name AS genre, COUNT(tracks.TrackId) AS track_count
+            FROM genres
+            JOIN tracks ON genres.GenreId = tracks.GenreId
+            GROUP BY genres.Name
+            ORDER BY track_count DESC
+        """,
+        "show customer count by country": """
+            SELECT Country AS country, COUNT(*) AS customer_count
+            FROM customers
+            GROUP BY Country
+            ORDER BY customer_count DESC
+        """,
+        "show monthly sales trend": """
+            SELECT strftime('%Y-%m', InvoiceDate) AS month, ROUND(SUM(Total), 2) AS total_sales
+            FROM invoices
+            GROUP BY month
+            ORDER BY month
+        """,
     },
     "northwind": {
-        "show top products by revenue",
-        "show order count by country",
-        "show revenue by category",
-        "show revenue by customer",
-        "show products with low stock",
-        "show orders by employee",
+        "show top products by revenue": """
+            SELECT Product.ProductName AS product,
+                   ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
+            FROM OrderDetail
+            JOIN Product ON Product.Id = OrderDetail.ProductId
+            GROUP BY Product.ProductName
+            ORDER BY revenue DESC
+        """,
+        "show order count by country": """
+            SELECT ShipCountry AS country, COUNT(*) AS order_count
+            FROM "Order"
+            GROUP BY ShipCountry
+            ORDER BY order_count DESC
+        """,
+        "show revenue by category": """
+            SELECT Category.CategoryName AS category,
+                   ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
+            FROM OrderDetail
+            JOIN Product ON Product.Id = OrderDetail.ProductId
+            JOIN Category ON Category.Id = Product.CategoryId
+            GROUP BY Category.CategoryName
+            ORDER BY revenue DESC
+        """,
+        "show revenue by customer": """
+            SELECT Customer.CompanyName AS customer,
+                   ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
+            FROM OrderDetail
+            JOIN "Order" ON "Order".Id = OrderDetail.OrderId
+            JOIN Customer ON Customer.Id = "Order".CustomerId
+            GROUP BY Customer.CompanyName
+            ORDER BY revenue DESC
+        """,
+        "show products with low stock": """
+            SELECT ProductName AS product, UnitsInStock AS units_in_stock, ReorderLevel AS reorder_level
+            FROM Product
+            WHERE UnitsInStock <= ReorderLevel
+            ORDER BY UnitsInStock ASC
+        """,
+        "show orders by employee": """
+            SELECT Employee.FirstName || ' ' || Employee.LastName AS employee, COUNT("Order".Id) AS order_count
+            FROM "Order"
+            JOIN Employee ON Employee.Id = "Order".EmployeeId
+            GROUP BY employee
+            ORDER BY order_count DESC
+        """,
     },
     "sakila": {
-        "show revenue by category",
-        "show film rental count",
-        "show top customers by payment amount",
-        "show rentals by store",
-        "show actor film count",
-        "show revenue by country",
+        "show revenue by category": """
+            SELECT category.name AS category, ROUND(SUM(payment.amount), 2) AS revenue
+            FROM payment
+            JOIN rental ON rental.rental_id = payment.rental_id
+            JOIN inventory ON inventory.inventory_id = rental.inventory_id
+            JOIN film_category ON film_category.film_id = inventory.film_id
+            JOIN category ON category.category_id = film_category.category_id
+            GROUP BY category.name
+            ORDER BY revenue DESC
+        """,
+        "show film rental count": """
+            SELECT film.title AS film, COUNT(*) AS rental_count
+            FROM rental
+            JOIN inventory ON inventory.inventory_id = rental.inventory_id
+            JOIN film ON film.film_id = inventory.film_id
+            GROUP BY film.title
+            ORDER BY rental_count DESC
+        """,
+        "show top customers by payment amount": """
+            SELECT customer.first_name || ' ' || customer.last_name AS customer,
+                   ROUND(SUM(payment.amount), 2) AS total_payment
+            FROM payment
+            JOIN customer ON customer.customer_id = payment.customer_id
+            GROUP BY customer.customer_id
+            ORDER BY total_payment DESC
+        """,
+        "show rentals by store": """
+            SELECT store.store_id AS store, COUNT(rental.rental_id) AS rental_count
+            FROM rental
+            JOIN inventory ON inventory.inventory_id = rental.inventory_id
+            JOIN store ON store.store_id = inventory.store_id
+            GROUP BY store.store_id
+            ORDER BY rental_count DESC
+        """,
+        "show actor film count": """
+            SELECT actor.first_name || ' ' || actor.last_name AS actor, COUNT(film_actor.film_id) AS film_count
+            FROM actor
+            JOIN film_actor ON actor.actor_id = film_actor.actor_id
+            GROUP BY actor.actor_id
+            ORDER BY film_count DESC
+        """,
+        "show revenue by country": """
+            SELECT country.country AS country, ROUND(SUM(payment.amount), 2) AS revenue
+            FROM payment
+            JOIN customer ON customer.customer_id = payment.customer_id
+            JOIN address ON address.address_id = customer.address_id
+            JOIN city ON city.city_id = address.city_id
+            JOIN country ON country.country_id = city.country_id
+            GROUP BY country.country
+            ORDER BY revenue DESC
+        """,
     },
 }
+
+FALLBACK_SAMPLE_QUESTIONS = {
+    database_name: set(templates)
+    for database_name, templates in FALLBACK_SQL_TEMPLATES.items()
+}
+
+
+def normalize_fallback_question(question: str) -> str:
+    return " ".join(question.lower().split())
+
+
+def is_supported_fallback_question(database_name: str, question: str) -> bool:
+    normalized_question = normalize_fallback_question(question)
+    return normalized_question in FALLBACK_SQL_TEMPLATES.get(database_name, {})
 
 
 class AnalysisAgentError(RuntimeError):
@@ -189,215 +321,19 @@ Rules:
         question: str,
         schema_text: str,
     ) -> str:
-        normalized_question = question.lower()
+        normalized_question = normalize_fallback_question(question)
+        templates = FALLBACK_SQL_TEMPLATES.get(database_name, {})
 
-        # Offline fallback templates keep tests and live demos reliable when the
-        # API is unavailable or when a deterministic example is preferred.
-        if not self._is_supported_fallback_question(database_name, normalized_question):
+        try:
+            return templates[normalized_question]
+        except KeyError as exc:
             raise SQLGenerationError(
-                "Offline fallback only supports the predefined sample questions. "
+                "Offline fallback only supports the predefined analysis sample questions. "
                 "Please choose one from Example question, or switch to Online OpenAI for custom questions."
-            )
-
-        if database_name == "chinook":
-            if "genre" in normalized_question and "track" in normalized_question:
-                return """
-                SELECT genres.Name AS genre, COUNT(tracks.TrackId) AS track_count
-                FROM genres
-                JOIN tracks ON genres.GenreId = tracks.GenreId
-                GROUP BY genres.Name
-                ORDER BY track_count DESC
-                """
-
-            if "customer" in normalized_question and "country" in normalized_question:
-                return """
-                SELECT Country AS country, COUNT(*) AS customer_count
-                FROM customers
-                GROUP BY Country
-                ORDER BY customer_count DESC
-                """
-
-            if ("monthly" in normalized_question or "trend" in normalized_question) and (
-                "sales" in normalized_question or "revenue" in normalized_question
-            ):
-                return """
-                SELECT strftime('%Y-%m', InvoiceDate) AS month, ROUND(SUM(Total), 2) AS total_sales
-                FROM invoices
-                GROUP BY month
-                ORDER BY month
-                """
-
-            if "sales" in normalized_question and "country" in normalized_question:
-                return """
-                SELECT BillingCountry AS country, ROUND(SUM(Total), 2) AS total_sales
-                FROM invoices
-                GROUP BY BillingCountry
-                ORDER BY total_sales DESC
-                """
-
-            if "invoice" in normalized_question and "country" in normalized_question:
-                return """
-                SELECT BillingCountry AS country, COUNT(*) AS invoice_count
-                FROM invoices
-                GROUP BY BillingCountry
-                ORDER BY invoice_count DESC
-                """
-
-            if "artist" in normalized_question and "sales" in normalized_question:
-                return """
-                SELECT artists.Name AS artist, ROUND(SUM(invoice_items.UnitPrice * invoice_items.Quantity), 2) AS total_sales
-                FROM artists
-                JOIN albums ON artists.ArtistId = albums.ArtistId
-                JOIN tracks ON albums.AlbumId = tracks.AlbumId
-                JOIN invoice_items ON tracks.TrackId = invoice_items.TrackId
-                GROUP BY artists.Name
-                ORDER BY total_sales DESC
-                """
-
-        if database_name == "northwind":
-            if "low" in normalized_question and "stock" in normalized_question:
-                return """
-                SELECT ProductName AS product, UnitsInStock AS units_in_stock, ReorderLevel AS reorder_level
-                FROM Product
-                WHERE UnitsInStock <= ReorderLevel
-                ORDER BY UnitsInStock ASC
-                """
-
-            if "category" in normalized_question and (
-                "sales" in normalized_question or "revenue" in normalized_question
-            ):
-                return """
-                SELECT Category.CategoryName AS category,
-                       ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
-                FROM OrderDetail
-                JOIN Product ON Product.Id = OrderDetail.ProductId
-                JOIN Category ON Category.Id = Product.CategoryId
-                GROUP BY Category.CategoryName
-                ORDER BY revenue DESC
-                """
-
-            if "customer" in normalized_question and (
-                "sales" in normalized_question or "revenue" in normalized_question
-            ):
-                return """
-                SELECT Customer.CompanyName AS customer,
-                       ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
-                FROM OrderDetail
-                JOIN "Order" ON "Order".Id = OrderDetail.OrderId
-                JOIN Customer ON Customer.Id = "Order".CustomerId
-                GROUP BY Customer.CompanyName
-                ORDER BY revenue DESC
-                """
-
-            if "employee" in normalized_question and "order" in normalized_question:
-                return """
-                SELECT Employee.FirstName || ' ' || Employee.LastName AS employee, COUNT("Order".Id) AS order_count
-                FROM "Order"
-                JOIN Employee ON Employee.Id = "Order".EmployeeId
-                GROUP BY employee
-                ORDER BY order_count DESC
-                """
-
-            if "product" in normalized_question and (
-                "sales" in normalized_question or "revenue" in normalized_question
-            ):
-                return """
-                SELECT Product.ProductName AS product,
-                       ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
-                FROM OrderDetail
-                JOIN Product ON Product.Id = OrderDetail.ProductId
-                GROUP BY Product.ProductName
-                ORDER BY revenue DESC
-                """
-
-            if "order" in normalized_question and "country" in normalized_question:
-                return """
-                SELECT ShipCountry AS country, COUNT(*) AS order_count
-                FROM "Order"
-                GROUP BY ShipCountry
-                ORDER BY order_count DESC
-                """
-
-        if database_name == "sakila":
-            if "customer" in normalized_question and (
-                "payment" in normalized_question
-                or "revenue" in normalized_question
-                or "amount" in normalized_question
-            ):
-                return """
-                SELECT customer.first_name || ' ' || customer.last_name AS customer,
-                       ROUND(SUM(payment.amount), 2) AS total_payment
-                FROM payment
-                JOIN customer ON customer.customer_id = payment.customer_id
-                GROUP BY customer.customer_id
-                ORDER BY total_payment DESC
-                """
-
-            if "store" in normalized_question and "rental" in normalized_question:
-                return """
-                SELECT store.store_id AS store, COUNT(rental.rental_id) AS rental_count
-                FROM rental
-                JOIN inventory ON inventory.inventory_id = rental.inventory_id
-                JOIN store ON store.store_id = inventory.store_id
-                GROUP BY store.store_id
-                ORDER BY rental_count DESC
-                """
-
-            if "actor" in normalized_question and "film" in normalized_question:
-                return """
-                SELECT actor.first_name || ' ' || actor.last_name AS actor, COUNT(film_actor.film_id) AS film_count
-                FROM actor
-                JOIN film_actor ON actor.actor_id = film_actor.actor_id
-                GROUP BY actor.actor_id
-                ORDER BY film_count DESC
-                """
-
-            if "country" in normalized_question and (
-                "sales" in normalized_question or "revenue" in normalized_question
-            ):
-                return """
-                SELECT country.country AS country, ROUND(SUM(payment.amount), 2) AS revenue
-                FROM payment
-                JOIN customer ON customer.customer_id = payment.customer_id
-                JOIN address ON address.address_id = customer.address_id
-                JOIN city ON city.city_id = address.city_id
-                JOIN country ON country.country_id = city.country_id
-                GROUP BY country.country
-                ORDER BY revenue DESC
-                """
-
-            if "category" in normalized_question and (
-                "sales" in normalized_question or "revenue" in normalized_question
-            ):
-                return """
-                SELECT category.name AS category, ROUND(SUM(payment.amount), 2) AS revenue
-                FROM payment
-                JOIN rental ON rental.rental_id = payment.rental_id
-                JOIN inventory ON inventory.inventory_id = rental.inventory_id
-                JOIN film_category ON film_category.film_id = inventory.film_id
-                JOIN category ON category.category_id = film_category.category_id
-                GROUP BY category.name
-                ORDER BY revenue DESC
-                """
-
-            if "film" in normalized_question and "rental" in normalized_question:
-                return """
-                SELECT film.title AS film, COUNT(*) AS rental_count
-                FROM rental
-                JOIN inventory ON inventory.inventory_id = rental.inventory_id
-                JOIN film ON film.film_id = inventory.film_id
-                GROUP BY film.title
-                ORDER BY rental_count DESC
-                """
-
-        raise SQLGenerationError(
-            "No offline SQL template matched this sample question. "
-            "Please switch to Online OpenAI or add a new fallback template."
-        )
+            ) from exc
 
     def _is_supported_fallback_question(self, database_name: str, normalized_question: str) -> bool:
-        supported_questions = FALLBACK_SAMPLE_QUESTIONS.get(database_name, set())
-        return normalized_question.strip() in supported_questions
+        return is_supported_fallback_question(database_name, normalized_question)
 
     def _validate_question_relevance(self, question: str, schema_text: str) -> None:
         # The guard prevents non-database requests from being forced into SQL.

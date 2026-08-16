@@ -30,7 +30,7 @@ The system contains two main agents:
 1. Data Analysis Agent
    - Reads the selected database schema.
    - Checks whether the user question is relevant to the database.
-   - Generates SQL using either OpenAI or offline fallback templates.
+   - Generates SQL using either OpenAI or exact offline sample-question templates.
    - Validates that the SQL is safe.
    - Runs the query against SQLite and returns a pandas DataFrame.
 
@@ -273,7 +273,8 @@ The options are filtered by the logged-in user's permissions.
 `Offline fallback`
 
 - Does not call OpenAI.
-- Uses predefined SQL templates in `analysis_agent.py`.
+- Only accepts predefined analysis sample questions.
+- Maps each supported sample question to one fixed SQL template in `analysis_agent.py`.
 - Best for stable testing and live demo safety.
 
 The assignment does not require both online and offline modes. They are included to balance AI flexibility with demo reliability.
@@ -424,7 +425,7 @@ users:
       - my_new_database
 ```
 
-4. Use Online OpenAI mode for flexible questions, or add offline fallback SQL templates to `analysis_agent.py` for stable demo examples.
+4. Use Online OpenAI mode for flexible questions, or add exact offline sample-question SQL templates to `analysis_agent.py` for stable demo examples.
 
 ## 12. Security and Safety
 
