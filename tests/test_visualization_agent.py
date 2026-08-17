@@ -9,6 +9,7 @@ from src.agents.orchestrator import AgentOrchestrator
 from src.agents.visualization_agent import DataVisualizationAgent
 
 
+# Verifies category-and-number data becomes a styled bar chart.
 def test_visualization_agent_creates_company_style_bar_chart(tmp_path: Path) -> None:
     dataframe = pd.DataFrame(
         {
@@ -34,6 +35,7 @@ def test_visualization_agent_creates_company_style_bar_chart(tmp_path: Path) -> 
     assert result.data_path.exists()
 
 
+# Verifies empty data still produces a safe table image.
 def test_visualization_agent_creates_table_for_empty_dataframe(tmp_path: Path) -> None:
     analysis_result = AnalysisResult(
         database_name="chinook",
@@ -52,6 +54,7 @@ def test_visualization_agent_creates_table_for_empty_dataframe(tmp_path: Path) -
     assert result.chart_path.stat().st_size > 0
 
 
+# Verifies forced line/scatter charts do not crash with one numeric column.
 def test_visualization_agent_handles_forced_line_and_scatter_with_one_numeric_column(
     tmp_path: Path,
 ) -> None:
@@ -82,6 +85,7 @@ def test_visualization_agent_handles_forced_line_and_scatter_with_one_numeric_co
     assert scatter_result.chart_path.stat().st_size > 0
 
 
+# Verifies the full two-agent pipeline returns both data and a chart.
 def test_orchestrator_runs_analysis_and_visualization_pipeline(tmp_path: Path) -> None:
     orchestrator = AgentOrchestrator(
         analysis_agent=DataAnalysisAgent(row_limit=5, use_openai=False),

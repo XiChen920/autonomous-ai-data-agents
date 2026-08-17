@@ -21,9 +21,11 @@ class ChartCreationError(RuntimeError):
 
 
 class ChartFactory:
+    # Loads the company chart style used by all chart outputs.
     def __init__(self, style: CompanyStyle | None = None) -> None:
         self.style = style or CompanyStyle.from_config()
 
+    # Creates a chart image file from a DataFrame.
     def create_chart(
         self,
         dataframe: pd.DataFrame,
@@ -70,6 +72,7 @@ class ChartFactory:
 
         return selected_type, output
 
+    # Chooses the most suitable chart type for the DataFrame shape.
     def choose_chart_type(self, dataframe: pd.DataFrame, requested_type: str = "auto") -> str:
         if dataframe.empty:
             return "table"
@@ -101,6 +104,7 @@ class ChartFactory:
 
         return "table"
 
+    # Applies shared company styling to a Matplotlib figure and axis.
     def _apply_base_style(self, figure, axis) -> None:
         figure.patch.set_facecolor(self.style.background_color)
         axis.set_facecolor(self.style.background_color)
@@ -110,6 +114,7 @@ class ChartFactory:
         for spine in axis.spines.values():
             spine.set_color(self.style.grid_color)
 
+    # Draws a horizontal bar chart for category-and-number results.
     def _draw_bar(self, axis, dataframe: pd.DataFrame, title: str) -> None:
         category_column = self._categorical_columns(dataframe)[0]
         value_column = self._numeric_columns(dataframe)[0]
@@ -124,6 +129,7 @@ class ChartFactory:
         axis.set_xlabel(value_column.replace("_", " ").title())
         axis.set_ylabel(category_column.replace("_", " ").title())
 
+    # Draws a line chart for trends or ordered numeric results.
     def _draw_line(self, axis, dataframe: pd.DataFrame, title: str) -> None:
         x_column, value_column = self._choose_xy_columns(dataframe)
         if value_column is None:
@@ -154,6 +160,7 @@ class ChartFactory:
         axis.set_ylabel(value_column.replace("_", " ").title())
         axis.tick_params(axis="x", rotation=30)
 
+    # Draws a scatter plot for numeric relationships or indexed values.
     def _draw_scatter(self, axis, dataframe: pd.DataFrame, title: str) -> None:
         x_column, y_column = self._choose_xy_columns(dataframe)
         if y_column is None:
@@ -179,6 +186,7 @@ class ChartFactory:
         axis.set_ylabel(y_column.replace("_", " ").title())
         axis.tick_params(axis="x", rotation=30)
 
+    # Draws a compact table when charting is not appropriate.
     def _draw_table(self, axis, dataframe: pd.DataFrame, title: str) -> None:
         axis.axis("off")
         axis.set_title(title, loc="left", weight="bold")
@@ -215,9 +223,11 @@ class ChartFactory:
             else:
                 cell.set_facecolor(self.style.background_color)
 
+    # Finds numeric columns that can be used as chart values.
     def _numeric_columns(self, dataframe: pd.DataFrame) -> list[str]:
         return [column for column in dataframe.columns if is_numeric_dtype(dataframe[column])]
 
+    # Finds non-numeric, non-date columns that can label chart categories.
     def _categorical_columns(self, dataframe: pd.DataFrame) -> list[str]:
         return [
             column
@@ -226,6 +236,7 @@ class ChartFactory:
             and not self._is_date_like_column(dataframe, column)
         ]
 
+    # Finds columns that appear to contain date or time values.
     def _date_columns(self, dataframe: pd.DataFrame) -> list[str]:
         return [
             column
@@ -233,6 +244,7 @@ class ChartFactory:
             if self._is_date_like_column(dataframe, column)
         ]
 
+    # Picks x and y columns for line and scatter charts.
     def _choose_xy_columns(self, dataframe: pd.DataFrame) -> tuple[str | None, str | None]:
         numeric_columns = self._numeric_columns(dataframe)
         if not numeric_columns:
@@ -256,6 +268,7 @@ class ChartFactory:
 
         return None, y_column
 
+    # Converts a selected x column into plottable values and an axis label.
     def _build_x_values(
         self,
         axis,
@@ -282,6 +295,7 @@ class ChartFactory:
         axis.set_xticklabels(labels)
         return positions, x_column.replace("_", " ").title()
 
+    # Detects date-like columns using dtype, name hints, and parse success.
     def _is_date_like_column(self, dataframe: pd.DataFrame, column: str) -> bool:
         if is_datetime64_any_dtype(dataframe[column]):
             return True

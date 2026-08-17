@@ -14,28 +14,35 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agents.analysis_agent import AnalysisAgentError, DataAnalysisAgent
+from src.agents.analysis_agent import is_supported_fallback_question
 from src.agents.orchestrator import AgentOrchestrator
 from src.agents.visualization_agent import DataVisualizationAgent
-from src.auth.access_control import AccessControlError
+from src.auth.access_control import AccessControl, AccessControlError
 from src.db.connector import DatabaseQueryError
-from src.db.registry import DatabaseRegistryError
+from src.db.registry import DatabaseRegistry, DatabaseRegistryError
 from src.db.sql_guard import UnsafeSQLError
 from src.visualization.chart_factory import ChartCreationError
 
 
+# Defines CLI arguments for running analysis and adding databases.
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Autonomous AI agents for SQLite data analysis and visualization."
     )
-    parser.add_argument("--user", required=True, help="Configured username, for example alice")
-    parser.add_argument("--db", required=True, help="Database name, for example chinook")
-    parser.add_argument("--question", required=True, help="Natural-language analysis question")
+    parser.add_argument("--user", help="Configured username, for example alice")
+    parser.add_argument("--db", help="Database name, for example chinook")
+    parser.add_argument("--question", help="Natural-language analysis question")
     parser.add_argument("--limit", type=int, default=100, help="Maximum rows returned")
     parser.add_argument(
         "--chart",
         default="auto",
         choices=["auto", "bar", "line", "scatter", "table"],
         help="Chart type for the visualization agent",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["online", "offline"],
+        help="Analysis mode. Online uses OpenAI; offline uses exact sample-question SQL templates.",
     )
     parser.add_argument(
         "--offline",
@@ -48,9 +55,110 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
         help="Number of result rows to print in the terminal",
     )
+    parser.add_argument(
+        "--add-database",
+        action="store_true",
+        help="Add or update a SQLite database entry in config/databases.yaml.",
+    )
+    parser.add_argument(
+        "--db-name",
+        help="Logical name for --add-database, for example custom_sales.",
+    )
+    parser.add_argument(
+        "--db-path",
+        help="SQLite file path for --add-database, for example data/custom_sales.sqlite.",
+    )
+    parser.add_argument(
+        "--description",
+        help="Human-readable database description for --add-database.",
+    )
+    parser.add_argument(
+        "--grant-user",
+        action="append",
+        default=[],
+        help="Grant the added database to a user. Repeat this option for multiple users.",
+    )
     return parser
 
 
+# Validates required arguments for the standard analysis run.
+def require_analysis_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    missing = [
+        flag
+        for flag, value in {
+            "--user": args.user,
+            "--db": args.db,
+            "--question": args.question,
+        }.items()
+        if not value
+    ]
+    if missing:
+        parser.error(f"analysis mode requires: {', '.join(missing)}")
+
+
+# Validates required arguments for the database integration command.
+def require_database_add_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    missing = [
+        flag
+        for flag, value in {
+            "--db-name": args.db_name,
+            "--db-path": args.db_path,
+            "--description": args.description,
+        }.items()
+        if not value
+    ]
+    if missing:
+        parser.error(f"--add-database requires: {', '.join(missing)}")
+
+
+# Adds or updates a database registry entry and optionally grants user access.
+def add_database_from_cli(args: argparse.Namespace) -> int:
+    registry = DatabaseRegistry()
+    access_control = AccessControl()
+
+    update_result = registry.add_or_update_database(
+        database_name=args.db_name,
+        database_path=args.db_path,
+        description=args.description,
+    )
+
+    print(f"Database '{update_result.database_name}' status: {update_result.status}")
+    print(f"Path: {update_result.current_database['path']}")
+    print(f"Description: {update_result.current_database['description']}")
+
+    if update_result.status == "updated":
+        changed = ", ".join(update_result.changed_fields)
+        print(f"Changed fields: {changed}")
+
+    if not args.grant_user:
+        print("No user permissions changed. Grant access in Streamlit or config/users.yaml.")
+        print("New databases have no offline sample questions; use online mode and type a custom question.")
+        return 0
+
+    for username in args.grant_user:
+        grant_result = access_control.grant_database_to_user(
+            username,
+            update_result.database_name,
+        )
+        permissions = ", ".join(grant_result.current_databases)
+        print(
+            f"User '{grant_result.username}' status: {grant_result.status}. "
+            f"Permissions: {permissions}"
+        )
+
+    print("New databases have no offline sample questions; use online mode and type a custom question.")
+    return 0
+
+
+# Chooses online or offline analysis from current and legacy CLI arguments.
+def should_use_openai(parser: argparse.ArgumentParser, args: argparse.Namespace) -> bool:
+    if args.offline and args.mode == "online":
+        parser.error("Use either --offline or --mode online, not both.")
+
+    return not (args.offline or args.mode == "offline")
+
+
+# Prints the pipeline result in a readable terminal format.
 def print_pipeline_result(result, preview_rows: int) -> None:
     analysis = result.analysis
 
@@ -77,13 +185,33 @@ def print_pipeline_result(result, preview_rows: int) -> None:
         print(f"Data saved to: {result.visualization.data_path}")
 
 
+# Runs the CLI workflow and returns a process exit code.
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.add_database:
+        require_database_add_args(parser, args)
+        try:
+            return add_database_from_cli(args)
+        except (AccessControlError, DatabaseRegistryError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    require_analysis_args(parser, args)
+    use_openai = should_use_openai(parser, args)
+
+    if not use_openai and not is_supported_fallback_question(args.db, args.question):
+        print(
+            "Error: Offline fallback only supports predefined sample questions. "
+            "For newly added databases, use --mode online and type a custom question.",
+            file=sys.stderr,
+        )
+        return 1
+
     analysis_agent = DataAnalysisAgent(
         row_limit=args.limit,
-        use_openai=not args.offline,
+        use_openai=use_openai,
     )
     visualization_agent = DataVisualizationAgent()
     orchestrator = AgentOrchestrator(
@@ -115,4 +243,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

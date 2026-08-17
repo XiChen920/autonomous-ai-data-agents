@@ -14,6 +14,7 @@ class ConfigError(RuntimeError):
     """Raised when a configuration file is missing or invalid."""
 
 
+# Loads one YAML file and returns it as a dictionary.
 def load_yaml(path: str | Path) -> dict[str, Any]:
     config_path = Path(path)
     if not config_path.is_absolute():
@@ -34,10 +35,12 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     return data
 
 
+# Loads a named file from the config directory.
 def load_config(filename: str) -> dict[str, Any]:
     return load_yaml(CONFIG_DIR / filename)
 
 
+# Writes a dictionary back to a YAML file.
 def save_yaml(path: str | Path, data: dict[str, Any]) -> None:
     config_path = Path(path)
     if not config_path.is_absolute():

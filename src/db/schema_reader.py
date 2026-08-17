@@ -6,14 +6,17 @@ from typing import Any
 from src.db.connector import SQLiteConnector
 
 
+# Quotes SQLite identifiers safely for schema introspection queries.
 def quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
 class SchemaReader:
+    # Creates a schema reader with a reusable SQLite connector.
     def __init__(self, connector: SQLiteConnector | None = None) -> None:
         self.connector = connector or SQLiteConnector()
 
+    # Lists user-defined tables in a SQLite database.
     def list_tables(self, database_path: str | Path) -> list[str]:
         sql = """
         SELECT name
@@ -25,6 +28,7 @@ class SchemaReader:
         dataframe = self.connector.run_query(database_path, sql)
         return dataframe["name"].tolist()
 
+    # Reads column metadata for one table.
     def get_table_columns(self, database_path: str | Path, table_name: str) -> list[dict[str, Any]]:
         sql = f"PRAGMA table_info({quote_identifier(table_name)})"
         dataframe = self.connector.run_query(database_path, sql)
@@ -42,6 +46,7 @@ class SchemaReader:
 
         return columns
 
+    # Builds compact schema text for the analysis prompt.
     def get_schema_text(self, database_path: str | Path) -> str:
         # The LLM prompt consumes this compact text representation of the schema.
         lines: list[str] = []

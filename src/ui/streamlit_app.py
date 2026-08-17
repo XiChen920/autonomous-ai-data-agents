@@ -68,14 +68,22 @@ EXAMPLE_QUESTIONS = {
 CUSTOM_QUESTION_LABEL = "None / custom question"
 
 
+# Creates the access-control service for the UI.
 def load_access_control() -> AccessControl:
     return AccessControl()
 
 
+# Creates the database registry service for the UI.
 def load_database_registry() -> DatabaseRegistry:
     return DatabaseRegistry()
 
 
+# Returns predefined example questions for built-in demo databases.
+def get_example_questions(database: str) -> list[str]:
+    return EXAMPLE_QUESTIONS.get(database, [])
+
+
+# Builds the orchestrator with UI-selected row limit and mode.
 def build_orchestrator(row_limit: int, use_openai: bool) -> AgentOrchestrator:
     analysis_agent = DataAnalysisAgent(
         row_limit=row_limit,
@@ -88,6 +96,7 @@ def build_orchestrator(row_limit: int, use_openai: bool) -> AgentOrchestrator:
     )
 
 
+# Computes the databases visible to the logged-in user.
 def get_allowed_database_options(
     access_control: AccessControl,
     database_registry: DatabaseRegistry,
@@ -98,6 +107,7 @@ def get_allowed_database_options(
     return sorted(allowed.intersection(configured))
 
 
+# Resets question controls when the selected database changes.
 def reset_question_state_if_needed(database: str, examples: list[str]) -> None:
     if st.session_state.get("active_question_database") == database:
         return
@@ -108,6 +118,7 @@ def reset_question_state_if_needed(database: str, examples: list[str]) -> None:
     st.session_state["question_text"] = selected if selected != CUSTOM_QUESTION_LABEL else ""
 
 
+# Copies the selected example question into the editable text area.
 def sync_question_from_example() -> None:
     selected = st.session_state.get("selected_example", CUSTOM_QUESTION_LABEL)
     if selected == CUSTOM_QUESTION_LABEL:
@@ -116,6 +127,7 @@ def sync_question_from_example() -> None:
         st.session_state["question_text"] = selected
 
 
+# Switches the example selector to custom mode when the text is edited.
 def sync_example_from_question() -> None:
     question_text = st.session_state.get("question_text", "").strip()
     selected = st.session_state.get("selected_example", CUSTOM_QUESTION_LABEL)
@@ -126,6 +138,7 @@ def sync_example_from_question() -> None:
         st.session_state["selected_example"] = CUSTOM_QUESTION_LABEL
 
 
+# Injects lightweight CSS for spacing and agent status text.
 def apply_page_style() -> None:
     st.markdown(
         """
@@ -177,6 +190,7 @@ def apply_page_style() -> None:
     )
 
 
+# Renders the username entry screen and stores the logged-in user.
 def render_login(access_control: AccessControl) -> str | None:
     st.title("Autonomous Data Agents")
     st.subheader("User access")
@@ -207,6 +221,7 @@ def render_login(access_control: AccessControl) -> str | None:
     return None
 
 
+# Renders the top workspace title, switch-user button, and permission summary.
 def render_workspace_header(user: str, access_control: AccessControl) -> None:
     header_columns = st.columns([3, 1])
     header_columns[0].title("Autonomous Data Agents")
@@ -221,6 +236,102 @@ def render_workspace_header(user: str, access_control: AccessControl) -> None:
     st.info(f"Authorized databases for {user}: {allowed}")
 
 
+# Renders the admin-only panel for adding or updating database integrations.
+def render_database_management(
+    access_control: AccessControl,
+    database_registry: DatabaseRegistry,
+    current_user: str,
+) -> None:
+    st.divider()
+    st.subheader("Database management")
+
+    notice = st.session_state.pop("database_admin_notice", None)
+    if notice:
+        notice_type, notice_text = notice
+        if notice_type == "success":
+            st.success(notice_text)
+        elif notice_type == "info":
+            st.info(notice_text)
+        else:
+            st.error(notice_text)
+
+    if current_user != "admin":
+        st.caption("Only admin can add or update database integrations.")
+        return
+
+    with st.expander("Add or update database"):
+        database_name = st.text_input(
+            "Database name",
+            placeholder="for example custom_sales",
+            key="new-database-name",
+        )
+        database_path = st.text_input(
+            "SQLite file path",
+            placeholder="for example data/custom_sales.sqlite",
+            key="new-database-path",
+        )
+        database_description = st.text_input(
+            "Description",
+            placeholder="for example Custom sales analytics database",
+            key="new-database-description",
+        )
+        grant_users = st.multiselect(
+            "Grant access to users",
+            access_control.list_users(),
+            default=[current_user],
+            key="new-database-grant-users",
+        )
+
+        if st.button("Save database integration", use_container_width=True):
+            try:
+                update_result = database_registry.add_or_update_database(
+                    database_name,
+                    database_path,
+                    database_description,
+                )
+                grant_messages = []
+                for username in grant_users:
+                    grant_result = access_control.grant_database_to_user(
+                        username,
+                        update_result.database_name,
+                    )
+                    grant_messages.append(
+                        f"{grant_result.username}: {grant_result.status}"
+                    )
+            except (AccessControlError, DatabaseRegistryError) as exc:
+                st.error(str(exc))
+            else:
+                if update_result.status == "created":
+                    message = (
+                        f"New database '{update_result.database_name}' loaded successfully. "
+                        f"Path: {update_result.current_database['path']}."
+                    )
+                    notice_type = "success"
+                elif update_result.status == "updated":
+                    changed = ", ".join(update_result.changed_fields)
+                    message = (
+                        f"Updated database '{update_result.database_name}'. "
+                        f"Changed fields: {changed}."
+                    )
+                    notice_type = "success"
+                else:
+                    message = f"No changes for database '{update_result.database_name}'."
+                    notice_type = "info"
+
+                if grant_messages:
+                    message += f" User grants: {'; '.join(grant_messages)}."
+                else:
+                    message += " No user permissions were changed."
+
+                message += (
+                    " Newly added databases do not have sample questions; "
+                    "use Online OpenAI mode and type a custom question."
+                )
+                st.session_state["database_admin_notice"] = (notice_type, message)
+                st.rerun()
+
+
+# Renders the admin-only panel for creating or updating user permissions.
 def render_user_management(
     access_control: AccessControl,
     database_registry: DatabaseRegistry,
@@ -278,6 +389,7 @@ def render_user_management(
                     )
 
 
+# Renders one visible status line for an agent task.
 def render_agent_step(title: str, body: str, done: bool = False) -> None:
     state_class = " agent-step-done" if done else ""
     check = "✓ " if done else ""
@@ -292,6 +404,7 @@ def render_agent_step(title: str, body: str, done: bool = False) -> None:
     )
 
 
+# Renders the final success line after both agents finish.
 def render_all_done() -> None:
     st.markdown(
         '<div class="agent-all-done">✓ All done. Data Analysis Agent and Data Visualization Agent completed the analysis workflow.</div>',
@@ -299,6 +412,7 @@ def render_all_done() -> None:
     )
 
 
+# Chooses the analysis status text for online, fallback, or offline mode.
 def analysis_working_step(use_openai: bool | None = None, sql_source: str | None = None) -> tuple[str, str]:
     if use_openai is False or sql_source == "fallback":
         return (
@@ -318,6 +432,7 @@ def analysis_working_step(use_openai: bool | None = None, sql_source: str | None
     )
 
 
+# Chooses the completed analysis status text from the actual SQL source.
 def analysis_done_step(analysis) -> tuple[str, str]:
     if analysis.sql_source == "openai":
         return (
@@ -337,6 +452,7 @@ def analysis_done_step(analysis) -> tuple[str, str]:
     )
 
 
+# Re-renders the persisted agent timeline after a result is locked.
 def render_agent_history(analysis, visualization) -> None:
     with st.status(
         "Both agents finished the analysis workflow",
@@ -368,6 +484,7 @@ def render_agent_history(analysis, visualization) -> None:
         render_all_done()
 
 
+# Renders summary, chart, data preview, SQL, and download links.
 def render_pipeline_result(result, analysis, visualization, preview_rows: int) -> None:
     chart_label = visualization.chart_type if visualization else "none"
     st.markdown(
@@ -423,6 +540,7 @@ def render_pipeline_result(result, analysis, visualization, preview_rows: int) -
                 )
 
 
+# Runs the Streamlit app from login through analysis and visualization.
 def main() -> None:
     load_dotenv()
 
@@ -487,19 +605,33 @@ def main() -> None:
             disabled=result_locked,
         )
         preview_rows = st.slider("Preview rows", min_value=1, max_value=50, value=10)
+        render_database_management(access_control, database_registry, user)
         render_user_management(access_control, database_registry, user)
 
-    examples = EXAMPLE_QUESTIONS.get(database, [])
+    examples = get_example_questions(database)
     reset_question_state_if_needed(database, examples)
-    example_options = [CUSTOM_QUESTION_LABEL] + examples
 
-    st.selectbox(
-        "Example question",
-        example_options,
-        key="selected_example",
-        on_change=sync_question_from_example,
-        disabled=result_locked,
-    )
+    if examples:
+        example_options = [CUSTOM_QUESTION_LABEL] + examples
+        st.selectbox(
+            "Example question",
+            example_options,
+            key="selected_example",
+            on_change=sync_question_from_example,
+            disabled=result_locked,
+        )
+    else:
+        st.selectbox(
+            "Example question",
+            [CUSTOM_QUESTION_LABEL],
+            key="selected_example",
+            disabled=True,
+        )
+        st.caption(
+            "No predefined sample questions are available for this database. "
+            "Type a custom question and use Online OpenAI mode."
+        )
+
     st.text_area(
         "Question",
         height=90,
@@ -508,16 +640,31 @@ def main() -> None:
         disabled=result_locked,
     )
     current_question = st.session_state.get("question_text", "").strip()
+    offline_without_examples = not use_openai and not examples
     offline_custom_question = (
         not use_openai
         and bool(current_question)
         and not is_supported_fallback_question(database, current_question)
     )
+    online_without_key_for_new_database = (
+        use_openai
+        and not os.getenv("OPENAI_API_KEY")
+        and not examples
+    )
 
-    if offline_custom_question and not result_locked:
+    if offline_without_examples and not result_locked:
+        st.warning(
+            "Offline fallback is only available for built-in sample databases with predefined questions. "
+            "For newly added databases, switch Mode to Online OpenAI and type a custom question."
+        )
+    elif offline_custom_question and not result_locked:
         st.warning(
             "Offline fallback only supports predefined analysis sample questions. "
             "Please choose a supported analysis sample, or switch Mode to Online OpenAI for custom questions."
+        )
+    elif online_without_key_for_new_database and not result_locked:
+        st.warning(
+            "This database has no offline SQL templates. Set OPENAI_API_KEY before running custom questions in Online OpenAI mode."
         )
 
     if result_locked:
@@ -538,7 +685,9 @@ def main() -> None:
     submitted = st.button(
         "Run analysis",
         type="primary",
-        disabled=offline_custom_question,
+        disabled=offline_without_examples
+        or offline_custom_question
+        or online_without_key_for_new_database,
     )
 
     if not submitted:
@@ -551,10 +700,12 @@ def main() -> None:
         st.error("Question is required.")
         return
 
-    if not use_openai and not is_supported_fallback_question(database, question):
+    if not use_openai and (
+        not examples or not is_supported_fallback_question(database, question)
+    ):
         st.error(
             "Offline fallback only supports predefined analysis sample questions. "
-            "Please choose a supported analysis sample, or switch Mode to Online OpenAI for custom questions."
+            "For newly added databases, switch Mode to Online OpenAI and type a custom question."
         )
         return
 

@@ -15,6 +15,7 @@ class CompanyStyle:
     chart_width: int = 900
     chart_height: int = 500
 
+    # Builds the style object from config/style.yaml.
     @classmethod
     def from_config(cls) -> "CompanyStyle":
         config = load_config("style.yaml")
@@ -29,6 +30,7 @@ class CompanyStyle:
             chart_height=int(style_config.get("chart_height", cls.chart_height)),
         )
 
+    # Converts pixel-like config dimensions into Matplotlib inches.
     @property
     def figsize(self) -> tuple[float, float]:
         return self.chart_width / 100, self.chart_height / 100

@@ -29,6 +29,7 @@ class UnsafeSQLError(ValueError):
     """Raised when generated SQL is not safe to execute."""
 
 
+# Flattens parsed SQL tokens so keyword checks can inspect the whole statement.
 def _flatten_token_values(statement: TokenList) -> list[str]:
     return [
         token.value.upper()
@@ -37,6 +38,7 @@ def _flatten_token_values(statement: TokenList) -> list[str]:
     ]
 
 
+# Validates that SQL is a single read-only SELECT/WITH query.
 def validate_select_only(sql: str) -> str:
     cleaned_sql = sql.strip().rstrip(";").strip()
     if not cleaned_sql:
@@ -68,6 +70,7 @@ def validate_select_only(sql: str) -> str:
     return cleaned_sql
 
 
+# Checks whether a SQL statement already contains a LIMIT clause.
 def has_limit(sql: str) -> bool:
     parsed = sqlparse.parse(sql)
     if not parsed:
@@ -76,6 +79,7 @@ def has_limit(sql: str) -> bool:
     return "LIMIT" in _flatten_token_values(parsed[0])
 
 
+# Adds a LIMIT clause after validating the SQL is safe.
 def ensure_limit(sql: str, limit: int = 100) -> str:
     cleaned_sql = validate_select_only(sql)
     if has_limit(cleaned_sql):

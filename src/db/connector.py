@@ -12,15 +12,18 @@ class DatabaseQueryError(RuntimeError):
 
 
 class SQLiteConnector:
+    # Stores the SQLite connection timeout.
     def __init__(self, timeout: int = 10) -> None:
         self.timeout = timeout
 
+    # Opens a SQLite database in read-only mode.
     def connect_readonly(self, database_path: str | Path) -> sqlite3.Connection:
         path = Path(database_path).resolve()
         # mode=ro ensures agent-generated queries cannot modify the source DB.
         uri = f"file:{path.as_posix()}?mode=ro"
         return sqlite3.connect(uri, uri=True, timeout=self.timeout)
 
+    # Executes a read-only SQL query and returns a pandas DataFrame.
     def run_query(
         self,
         database_path: str | Path,

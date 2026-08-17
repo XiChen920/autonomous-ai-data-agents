@@ -34,16 +34,19 @@ class UserPermissionUpdate:
     previous_databases: list[str]
     current_databases: list[str]
 
+    # Lists databases newly granted by an update.
     @property
     def added_databases(self) -> list[str]:
         return sorted(set(self.current_databases) - set(self.previous_databases))
 
+    # Lists databases removed by an update.
     @property
     def removed_databases(self) -> list[str]:
         return sorted(set(self.previous_databases) - set(self.current_databases))
 
 
 class AccessControl:
+    # Loads configured users and their database permissions.
     def __init__(self, users_config_path: str | Path | None = None) -> None:
         self.users_config_path = Path(users_config_path) if users_config_path else CONFIG_DIR / "users.yaml"
 
@@ -54,9 +57,11 @@ class AccessControl:
 
         self.users: dict = config.get("users", {})
 
+    # Returns all configured usernames for login hints and admin display.
     def list_users(self) -> list[str]:
         return sorted(self.users.keys())
 
+    # Gets the database names a user is allowed to access.
     def allowed_databases(self, username: str) -> list[str]:
         if username not in self.users:
             raise UnknownUserError(f"Unknown user: {username}")
@@ -64,9 +69,11 @@ class AccessControl:
         allowed = self.users[username].get("allowed_databases", [])
         return list(allowed)
 
+    # Checks access without raising when the database is allowed.
     def can_access(self, username: str, database_name: str) -> bool:
         return database_name in self.allowed_databases(username)
 
+    # Enforces access and raises a readable error when blocked.
     def require_access(self, username: str, database_name: str) -> None:
         if not self.can_access(username, database_name):
             allowed = ", ".join(self.allowed_databases(username)) or "none"
@@ -75,6 +82,7 @@ class AccessControl:
                 f"'{database_name}'. Allowed databases: {allowed}."
             )
 
+    # Creates a new user or updates an existing user's database permissions.
     def add_or_update_user(
         self,
         username: str,
@@ -109,4 +117,10 @@ class AccessControl:
             previous_databases=previous_databases,
             current_databases=current_databases,
         )
-        save_yaml(self.users_config_path, {"users": self.users})
+
+    # Grants one database to a new or existing user.
+    def grant_database_to_user(self, username: str, database_name: str) -> UserPermissionUpdate:
+        username = username.strip()
+        database_name = database_name.strip()
+        previous_databases = list(self.users.get(username, {}).get("allowed_databases", []))
+        return self.add_or_update_user(username, previous_databases + [database_name])

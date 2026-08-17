@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 
+# Defines diagnostic command options.
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Check OpenAI API key access and list available models."
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Creates an OpenAI client when an API key is configured.
 def get_client() -> OpenAI | None:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -43,6 +45,7 @@ def get_client() -> OpenAI | None:
     return OpenAI(api_key=api_key)
 
 
+# Prints models available to the configured API key.
 def list_models(client: OpenAI) -> bool:
     try:
         models = client.models.list()
@@ -58,6 +61,7 @@ def list_models(client: OpenAI) -> bool:
     return True
 
 
+# Sends a tiny request to confirm the selected model works.
 def check_completion(client: OpenAI, model: str) -> bool:
     try:
         response = client.responses.create(
@@ -77,6 +81,7 @@ def check_completion(client: OpenAI, model: str) -> bool:
     return True
 
 
+# Runs the selected diagnostics and returns a process exit code.
 def main() -> int:
     load_dotenv()
     parser = build_parser()
@@ -102,4 +107,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

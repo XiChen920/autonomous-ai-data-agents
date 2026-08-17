@@ -172,10 +172,12 @@ FALLBACK_SAMPLE_QUESTIONS = {
 }
 
 
+# Normalizes sample questions so offline matching is stable.
 def normalize_fallback_question(question: str) -> str:
     return " ".join(question.lower().split())
 
 
+# Checks whether offline mode supports a database/question pair.
 def is_supported_fallback_question(database_name: str, question: str) -> bool:
     normalized_question = normalize_fallback_question(question)
     return normalized_question in FALLBACK_SQL_TEMPLATES.get(database_name, {})
@@ -202,12 +204,14 @@ class AnalysisResult:
     dataframe: pd.DataFrame
     sql_source: str
 
+    # Returns the number of rows produced by the analysis query.
     @property
     def row_count(self) -> int:
         return len(self.dataframe)
 
 
 class DataAnalysisAgent:
+    # Configures dependencies, model choice, row limit, and online/offline mode.
     def __init__(
         self,
         connector: SQLiteConnector | None = None,
@@ -225,6 +229,7 @@ class DataAnalysisAgent:
         self.use_openai = use_openai
         self.sql_generator = sql_generator
 
+    # Runs the full analysis flow from question to DataFrame and summary.
     def analyze(
         self,
         database_path: str | Path,
@@ -247,6 +252,7 @@ class DataAnalysisAgent:
             sql_source=sql_source,
         )
 
+    # Chooses injected SQL, OpenAI SQL, or offline sample-template SQL.
     def generate_sql(
         self,
         database_name: str,
@@ -265,6 +271,7 @@ class DataAnalysisAgent:
 
         return self._generate_fallback_sql(database_name, question, schema_text), "fallback"
 
+    # Calls OpenAI to generate a SQLite SELECT query from schema and question.
     def _generate_sql_with_openai(
         self,
         database_name: str,
@@ -281,6 +288,7 @@ class DataAnalysisAgent:
         )
         return self._extract_sql(response.output_text)
 
+    # Builds the prompt that constrains the model to safe SQL output.
     def _build_sql_prompt(self, database_name: str, question: str, schema_text: str) -> str:
         return f"""
 You are the Data Analysis Agent for a SQLite analytics system.
@@ -304,6 +312,7 @@ Rules:
 - Prefer clear aliases for output columns.
 """.strip()
 
+    # Extracts the first SELECT/WITH query from a model response.
     def _extract_sql(self, text: str) -> str:
         code_block = re.search(r"```(?:sql)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
         candidate = code_block.group(1).strip() if code_block else text.strip()
@@ -315,6 +324,7 @@ Rules:
 
         return candidate[match.start() :].strip()
 
+    # Looks up exact offline SQL templates for supported sample questions.
     def _generate_fallback_sql(
         self,
         database_name: str,
@@ -332,9 +342,11 @@ Rules:
                 "Please choose one from Example question, or switch to Online OpenAI for custom questions."
             ) from exc
 
+    # Wraps the module-level fallback support check for class callers.
     def _is_supported_fallback_question(self, database_name: str, normalized_question: str) -> bool:
         return is_supported_fallback_question(database_name, normalized_question)
 
+    # Rejects questions that do not look related to the selected database.
     def _validate_question_relevance(self, question: str, schema_text: str) -> None:
         # The guard prevents non-database requests from being forced into SQL.
         normalized_question = question.lower()
@@ -398,6 +410,7 @@ Rules:
             "Please ask about tables, fields, counts, totals, rankings, revenue, sales, orders, customers, rentals, or trends."
         )
 
+    # Extracts useful table and column words from schema text.
     def _schema_keywords(self, schema_text: str) -> set[str]:
         spaced_schema = re.sub(r"([a-z])([A-Z])", r"\1 \2", schema_text)
         words = {
@@ -425,6 +438,7 @@ Rules:
         singulars = {word[:-1] for word in keywords if word.endswith("s") and len(word) > 3}
         return keywords.union(singulars)
 
+    # Finds the first schema table name for legacy fallback helpers.
     def _first_table_from_schema(self, schema_text: str) -> str:
         match = re.search(r"^Table\s+([^:]+):", schema_text, flags=re.MULTILINE)
         if not match:
@@ -432,6 +446,7 @@ Rules:
 
         return match.group(1)
 
+    # Creates a compact human-readable summary of the returned DataFrame.
     def summarize(self, question: str, dataframe: pd.DataFrame) -> str:
         if dataframe.empty:
             return "The query ran successfully but returned no rows."

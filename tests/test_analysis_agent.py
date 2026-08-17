@@ -13,9 +13,11 @@ from src.auth.access_control import AccessDeniedError
 from src.db.registry import DatabaseRegistry
 
 
+# Verifies injected SQL can be executed and limited by the agent.
 def test_analysis_agent_runs_injected_sql_against_chinook() -> None:
     registry = DatabaseRegistry()
 
+    # Supplies deterministic SQL so the test does not depend on OpenAI.
     def fixed_sql(database_name: str, question: str, schema_text: str) -> str:
         return """
         SELECT BillingCountry AS country, ROUND(SUM(Total), 2) AS total_sales
@@ -42,6 +44,7 @@ def test_analysis_agent_runs_injected_sql_against_chinook() -> None:
     assert "LIMIT 5" in result.sql
 
 
+# Verifies a supported offline sample question returns expected data.
 def test_analysis_agent_fallback_supports_common_chinook_question() -> None:
     registry = DatabaseRegistry()
     agent = DataAnalysisAgent(row_limit=3, use_openai=False)
@@ -57,6 +60,7 @@ def test_analysis_agent_fallback_supports_common_chinook_question() -> None:
     assert "total_sales" in result.dataframe.columns
 
 
+# Verifies non-analysis questions are rejected before SQL generation.
 def test_analysis_agent_rejects_irrelevant_question() -> None:
     registry = DatabaseRegistry()
     agent = DataAnalysisAgent(row_limit=3, use_openai=False)
@@ -69,6 +73,7 @@ def test_analysis_agent_rejects_irrelevant_question() -> None:
         )
 
 
+# Verifies offline mode rejects questions without fixed SQL templates.
 def test_analysis_agent_offline_rejects_custom_question_without_sample_template() -> None:
     registry = DatabaseRegistry()
     agent = DataAnalysisAgent(row_limit=3, use_openai=False)
@@ -81,6 +86,7 @@ def test_analysis_agent_offline_rejects_custom_question_without_sample_template(
         )
 
 
+# Verifies offline mode requires exact sample-question wording.
 def test_analysis_agent_offline_requires_exact_sample_question() -> None:
     registry = DatabaseRegistry()
     agent = DataAnalysisAgent(row_limit=3, use_openai=False)
@@ -96,6 +102,15 @@ def test_analysis_agent_offline_requires_exact_sample_question() -> None:
         )
 
 
+# Verifies newly added databases do not get offline sample templates automatically.
+def test_custom_database_has_no_offline_sample_question_by_default() -> None:
+    assert not is_supported_fallback_question(
+        "custom_sales",
+        "Show total amount by region",
+    )
+
+
+# Verifies the orchestrator blocks unauthorized database access.
 def test_orchestrator_blocks_unauthorized_database_access() -> None:
     orchestrator = AgentOrchestrator(
         analysis_agent=DataAnalysisAgent(row_limit=3, use_openai=False)

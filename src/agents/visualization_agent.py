@@ -21,6 +21,7 @@ class VisualizationResult:
 
 
 class DataVisualizationAgent:
+    # Configures chart creation and output storage.
     def __init__(
         self,
         chart_factory: ChartFactory | None = None,
@@ -29,6 +30,7 @@ class DataVisualizationAgent:
         self.chart_factory = chart_factory or ChartFactory()
         self.output_dir = Path(output_dir) if output_dir else PROJECT_ROOT / "outputs" / "charts"
 
+    # Turns an analysis DataFrame into a styled chart and CSV output.
     def visualize(
         self,
         analysis_result: AnalysisResult,
@@ -58,11 +60,13 @@ class DataVisualizationAgent:
             data_path=data_path,
         )
 
+    # Builds a safe filename from database name and question text.
     def _build_filename(self, database_name: str, question: str) -> str:
         slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")
         slug = slug[:60].strip("-") or "analysis"
         return f"{database_name}-{slug}"
 
+    # Shortens long chart titles so they fit the saved figure.
     def _build_title(self, question: str) -> str:
         question = question.strip()
         if len(question) <= 90:

@@ -51,7 +51,7 @@ The project is designed around controllability, user restrictions, simple databa
 | Simple UI or CLI | Streamlit UI launched by `streamlit_app.py`; CLI launched by `cli_app.py` |
 | User controllability | Users choose database, question, mode, chart type, row limit, and preview rows |
 | User restriction | `config/users.yaml` limits which databases each user can access |
-| Easy integration | New databases can be added through `config/databases.yaml` |
+| Easy integration | New databases can be added through the Streamlit admin panel, CLI, or `config/databases.yaml` |
 | Automated testing | `pytest` tests in the `tests/` folder |
 | Live demonstration | Streamlit app at `http://localhost:8501` |
 
@@ -253,6 +253,19 @@ Updated user 'charlie'. Changes: added northwind; removed sakila.
 No changes for user 'charlie'. Permissions remain: chinook, sakila.
 ```
 
+### Admin Database Management
+
+Only `admin` sees the database management panel.
+
+Admin can:
+
+- Add a new SQLite database integration.
+- Update the path or description of an existing database.
+- Grant the new database to selected users.
+- See whether the save action created, updated, or changed nothing.
+
+Newly added databases do not automatically get predefined sample questions. In the UI, users must type a custom question and use `Online OpenAI` mode for those databases.
+
 ## 7. UI Controls
 
 ### Database
@@ -323,19 +336,19 @@ The system queries up to 50 rows, but the UI preview shows 10.
 Run a stable offline demo:
 
 ```powershell
-venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --offline --limit 5
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --mode offline --limit 5
 ```
 
 Run online OpenAI mode:
 
 ```powershell
-venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Which countries have the highest average invoice value?" --limit 10
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Which countries have the highest average invoice value?" --mode online --limit 10
 ```
 
 Test access denial:
 
 ```powershell
-venv\Scripts\python.exe cli_app.py --user bob --db chinook --question "Show total sales by country" --offline
+venv\Scripts\python.exe cli_app.py --user bob --db chinook --question "Show total sales by country" --mode offline
 ```
 
 Expected result:
@@ -343,6 +356,20 @@ Expected result:
 ```text
 Error: User 'bob' is not allowed to access database 'chinook'.
 ```
+
+Add or update a database from the CLI:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin
+```
+
+After adding a new database, use online mode and type a custom question:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --user admin --db custom_sales --question "Show total amount by region" --mode online --limit 10
+```
+
+The legacy `--offline` flag still works for built-in sample questions, but `--mode offline` is clearer for demos.
 
 ## 9. OpenAI Configuration
 
@@ -382,22 +409,57 @@ venv\Scripts\python.exe -m pytest -q
 Current expected result:
 
 ```text
-15 passed
+20 passed
 ```
 
 The tests cover:
 
 - User access control
 - Adding and updating user permissions
+- Adding new user permissions
 - Database registry path resolution
+- Adding new database integrations
 - SQLite schema reading
 - SQL safety checks
 - Analysis Agent fallback behavior
+- New databases having no offline sample questions by default
 - Invalid question rejection
 - Visualization Agent chart generation
 - End-to-end analysis and visualization pipeline
+- New user plus new database access through the orchestrator
 
 ## 11. Adding a New Database
+
+There are three supported ways to add a database: Streamlit admin UI, CLI, or manual YAML editing.
+
+### Option A: Streamlit admin UI
+
+1. Log in as `admin`.
+2. Open `Database management` in the sidebar.
+3. Enter:
+   - Database name, for example `custom_sales`
+   - SQLite file path, for example `data/custom_sales.sqlite`
+   - Description, for example `Custom sales analytics database`
+4. Select users to grant access to.
+5. Click `Save database integration`.
+
+After saving, the database selector updates for users who were granted access.
+
+### Option B: CLI
+
+Put the SQLite file in `data/`, then run:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin
+```
+
+Repeat `--grant-user` to grant multiple users:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin --grant-user alice
+```
+
+### Option C: Manual config
 
 1. Put the SQLite file in `data/`.
 
@@ -425,7 +487,9 @@ users:
       - my_new_database
 ```
 
-4. Use Online OpenAI mode for flexible questions, or add exact offline sample-question SQL templates to `analysis_agent.py` for stable demo examples.
+4. Use `Online OpenAI` mode and type a custom question.
+
+Important: newly added databases do not automatically appear in `Example question`, and they do not support `Offline fallback` unless you manually add exact SQL templates to `analysis_agent.py`. This is intentional: sample questions are locked to predefined SQL, while new databases are handled through typed custom questions in online mode.
 
 ## 12. Security and Safety
 
