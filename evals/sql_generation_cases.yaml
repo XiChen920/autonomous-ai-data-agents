@@ -1,0 +1,63 @@
+# Starter SQL-generation benchmark cases.
+# These cases check whether generated SQL executes and returns the expected
+# result shape. This is a seed benchmark, not a large-scale LLM accuracy study.
+cases:
+  - id: chinook_sales_by_country
+    database: chinook
+    question: Show total sales by country
+    expected_columns:
+      - country
+      - total_sales
+    min_rows: 1
+    expected_sql_contains:
+      - invoices
+      - BillingCountry
+      - SUM
+
+  - id: chinook_monthly_sales_trend
+    database: chinook
+    question: Show monthly sales trend
+    expected_columns:
+      - month
+      - total_sales
+    min_rows: 1
+    expected_sql_contains:
+      - invoices
+      - InvoiceDate
+      - SUM
+
+  - id: northwind_revenue_by_category
+    database: northwind
+    question: Show revenue by category
+    expected_columns:
+      - category
+      - revenue
+    min_rows: 1
+    expected_sql_contains:
+      - OrderDetail
+      - Category
+      - SUM
+
+  - id: sakila_revenue_by_category
+    database: sakila
+    question: Show revenue by category
+    expected_columns:
+      - category
+      - revenue
+    min_rows: 1
+    expected_sql_contains:
+      - payment
+      - category
+      - SUM
+
+  - id: chinook_average_invoice_by_country
+    database: chinook
+    question: Which countries have the highest average invoice value?
+    expected_columns:
+      - country
+      - average_invoice_value
+    min_rows: 1
+    expected_sql_contains:
+      - invoices
+      - AVG
+    online_only: true

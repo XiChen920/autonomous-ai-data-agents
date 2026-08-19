@@ -147,13 +147,51 @@ def apply_page_style() -> None:
             padding-top: 4.25rem;
             padding-bottom: 2rem;
             max-width: 1180px;
+            font-size: 1.06rem;
         }
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 3.5rem;
         }
+        section[data-testid="stSidebar"] {
+            min-width: 340px !important;
+            width: 340px !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+            font-size: 1.08rem !important;
+            font-weight: 700;
+        }
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] span,
+        section[data-testid="stSidebar"] label {
+            font-size: 1.02rem !important;
+        }
+        section[data-testid="stSidebar"] button {
+            font-size: 1.02rem !important;
+            min-height: 2.65rem;
+        }
+        section[data-testid="stSidebar"] input,
+        section[data-testid="stSidebar"] textarea,
+        section[data-testid="stSidebar"] [data-baseweb="select"] * {
+            font-size: 1.02rem !important;
+        }
+        .block-container [data-testid="stMarkdownContainer"] p,
+        .block-container textarea,
+        .block-container input,
+        .block-container button {
+            font-size: 1.04rem;
+        }
+        .block-container h1 {
+            font-size: 2.45rem;
+        }
+        .block-container h2 {
+            font-size: 1.85rem;
+        }
+        .block-container h3 {
+            font-size: 1.45rem;
+        }
         .result-meta {
             color: #52616F;
-            font-size: 0.92rem;
+            font-size: 1rem;
             margin: 0.25rem 0 1rem 0;
         }
         .agent-step {
@@ -166,6 +204,7 @@ def apply_page_style() -> None:
         .agent-step-title {
             color: #1F77B4;
             font-weight: 700;
+            font-size: 1.06rem;
             margin-bottom: 0.05rem;
         }
         .agent-step-done .agent-step-title {
@@ -173,12 +212,13 @@ def apply_page_style() -> None:
         }
         .agent-step-body {
             color: #52616F;
-            font-size: 0.92rem;
+            font-size: 1rem;
             line-height: 1.35;
         }
         .agent-all-done {
             color: #2D8A4E;
             font-weight: 700;
+            font-size: 1.06rem;
             margin-top: 0.75rem;
         }
         code {

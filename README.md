@@ -79,6 +79,7 @@ autonomous-ai-data-agents/
   cli_app.py
   streamlit_app.py
   openai_diagnostics.py
+  sql_generation_evaluator.py
   README.md
   requirements.txt
   .env.example
@@ -93,6 +94,9 @@ autonomous-ai-data-agents/
     chinook.db
     northwind_small.sqlite
     sakila.db
+
+  evals/
+    sql_generation_cases.yaml
 
   src/
     agents/
@@ -117,6 +121,7 @@ autonomous-ai-data-agents/
 
     tools/
       openai_diagnostics.py
+      sql_generation_evaluator.py
 
     utils/
       config_loader.py
@@ -129,6 +134,7 @@ autonomous-ai-data-agents/
     test_foundation.py
     test_analysis_agent.py
     test_visualization_agent.py
+    test_sql_generation_evaluator.py
 
   outputs/
     charts/
@@ -409,7 +415,7 @@ venv\Scripts\python.exe -m pytest -q
 Current expected result:
 
 ```text
-20 passed
+23 passed
 ```
 
 The tests cover:
@@ -427,8 +433,39 @@ The tests cover:
 - Visualization Agent chart generation
 - End-to-end analysis and visualization pipeline
 - New user plus new database access through the orchestrator
+- Starter SQL-generation evaluation cases
 
-## 11. Adding a New Database
+## 11. SQL Generation Evaluation
+
+The project includes a starter benchmark for generated SQL in `evals/sql_generation_cases.yaml`.
+
+Important limitation: the current automated tests validate the pipeline and a small set of starter cases, but they are not a large-scale accuracy evaluation for OpenAI-generated SQL.
+
+Run deterministic offline eval:
+
+```powershell
+venv\Scripts\python.exe sql_generation_evaluator.py --mode offline
+```
+
+This uses exact sample-question SQL templates and skips cases marked `online_only`.
+
+Run OpenAI SQL-generation eval:
+
+```powershell
+venv\Scripts\python.exe sql_generation_evaluator.py --mode online
+```
+
+The online eval checks whether the OpenAI-generated SQL:
+
+- Actually came from OpenAI, not offline fallback
+- Executes successfully
+- Returns at least the expected number of rows
+- Includes expected output columns
+- Contains important SQL fragments such as key tables or aggregation functions
+
+To turn this into a stronger production-style evaluation, add more golden cases to `evals/sql_generation_cases.yaml`, cover more databases and question types, and track pass rate over time.
+
+## 12. Adding a New Database
 
 There are three supported ways to add a database: Streamlit admin UI, CLI, or manual YAML editing.
 
@@ -491,7 +528,7 @@ users:
 
 Important: newly added databases do not automatically appear in `Example question`, and they do not support `Offline fallback` unless you manually add exact SQL templates to `analysis_agent.py`. This is intentional: sample questions are locked to predefined SQL, while new databases are handled through typed custom questions in online mode.
 
-## 12. Security and Safety
+## 13. Security and Safety
 
 The project includes several safety layers:
 
@@ -503,7 +540,7 @@ The project includes several safety layers:
 - Row limits prevent large accidental result sets.
 - Irrelevant user questions are rejected before SQL generation.
 
-## 13. Recommended Live Demo Flow
+## 14. Recommended Live Demo Flow
 
 1. Log in as `bob`.
 2. Show that only `sakila` is available.
@@ -532,7 +569,7 @@ Tell me a joke about pizza
 
 Expected result: the system rejects it as unrelated to database analysis.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 If Streamlit asks for an email on first launch, press Enter to skip it.
 

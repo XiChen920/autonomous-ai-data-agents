@@ -1,5 +1,3 @@
-# User access-control configuration.
-# Each user can only see and query the databases listed under allowed_databases.
 users:
   alice:
     allowed_databases:
@@ -12,7 +10,4 @@ users:
     allowed_databases:
     - chinook
     - northwind
-    - sakila
-  sara:
-    allowed_databases:
     - sakila

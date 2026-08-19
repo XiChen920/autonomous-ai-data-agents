@@ -17,10 +17,15 @@ __pycache__/
 # Local OS/cache files
 .DS_Store
 Thumbs.db
+~$*.pptx
 
 # Generated analysis outputs
 outputs/charts/
 outputs/reports/
+
+# Generated presentation review artifacts
+.tmp_ppt_review/
+presentation/*/
 
 # SQLite temporary files
 *.db-journal
