@@ -32,6 +32,7 @@ from src.auth.access_control import (
 from src.db.connector import DatabaseQueryError
 from src.db.registry import DatabaseRegistry, DatabaseRegistryError
 from src.db.sql_guard import UnsafeSQLError
+from src.observability.analysis_logger import AnalysisLogError, AnalysisLogger
 from src.visualization.chart_factory import ChartCreationError
 
 
@@ -586,6 +587,38 @@ def render_pipeline_result(result, analysis, visualization, preview_rows: int) -
                 )
 
 
+# Renders user feedback controls and stores feedback against the run log id.
+def render_feedback_controls(run_id: str, user: str) -> None:
+    if not run_id:
+        return
+
+    st.subheader("Feedback")
+    rating = st.radio(
+        "Was this result useful?",
+        ["correct", "partially correct", "incorrect"],
+        horizontal=True,
+        key=f"feedback_rating_{run_id}",
+    )
+    comment = st.text_area(
+        "Optional feedback",
+        height=80,
+        key=f"feedback_comment_{run_id}",
+    )
+
+    if st.button("Save feedback", key=f"save_feedback_{run_id}"):
+        try:
+            AnalysisLogger().record_feedback(
+                run_id=run_id,
+                rating=rating,
+                comment=comment.strip(),
+                user=user,
+            )
+        except AnalysisLogError as exc:
+            st.error(str(exc))
+        else:
+            st.success("Feedback saved to the analysis log.")
+
+
 # Runs the Streamlit app from login through analysis and visualization.
 def main() -> None:
     load_dotenv()
@@ -726,6 +759,7 @@ def main() -> None:
             saved_output["visualization"],
             preview_rows=preview_rows,
         )
+        render_feedback_controls(saved_output["result"].run_id, user)
         return
 
     submitted = st.button(
@@ -769,12 +803,14 @@ def main() -> None:
                 analysis_working_title,
                 analysis_working_body,
             )
-            result = orchestrator.run_analysis(
+            result = orchestrator.run_pipeline(
                 user=user,
                 database=database,
                 question=question,
+                chart_type=chart_type,
             )
             analysis = result.analysis
+            visualization = result.visualization
             analysis_done_title, analysis_done_body = analysis_done_step(analysis)
             render_agent_step(
                 analysis_done_title,
@@ -785,10 +821,6 @@ def main() -> None:
             render_agent_step(
                 "Data Visualization Agent: working",
                 "Selecting the chart format, applying company style, and saving PNG/CSV outputs.",
-            )
-            visualization = orchestrator.visualization_agent.visualize(
-                analysis,
-                chart_type=chart_type,
             )
             render_agent_step(
                 "Data Visualization Agent: visualization task done",

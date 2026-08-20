@@ -13,6 +13,12 @@ cases:
       - invoices
       - BillingCountry
       - SUM
+    golden_sql: |
+      SELECT BillingCountry AS country, ROUND(SUM(Total), 2) AS total_sales
+      FROM invoices
+      GROUP BY BillingCountry
+      ORDER BY total_sales DESC
+    numeric_tolerance: 0.01
 
   - id: chinook_monthly_sales_trend
     database: chinook
@@ -25,6 +31,12 @@ cases:
       - invoices
       - InvoiceDate
       - SUM
+    golden_sql: |
+      SELECT strftime('%Y-%m', InvoiceDate) AS month, ROUND(SUM(Total), 2) AS total_sales
+      FROM invoices
+      GROUP BY month
+      ORDER BY month
+    numeric_tolerance: 0.01
 
   - id: northwind_revenue_by_category
     database: northwind
@@ -37,6 +49,15 @@ cases:
       - OrderDetail
       - Category
       - SUM
+    golden_sql: |
+      SELECT Category.CategoryName AS category,
+             ROUND(SUM(OrderDetail.UnitPrice * OrderDetail.Quantity * (1 - OrderDetail.Discount)), 2) AS revenue
+      FROM OrderDetail
+      JOIN Product ON Product.Id = OrderDetail.ProductId
+      JOIN Category ON Category.Id = Product.CategoryId
+      GROUP BY Category.CategoryName
+      ORDER BY revenue DESC
+    numeric_tolerance: 0.01
 
   - id: sakila_revenue_by_category
     database: sakila
@@ -49,6 +70,16 @@ cases:
       - payment
       - category
       - SUM
+    golden_sql: |
+      SELECT category.name AS category, ROUND(SUM(payment.amount), 2) AS revenue
+      FROM payment
+      JOIN rental ON rental.rental_id = payment.rental_id
+      JOIN inventory ON inventory.inventory_id = rental.inventory_id
+      JOIN film_category ON film_category.film_id = inventory.film_id
+      JOIN category ON category.category_id = film_category.category_id
+      GROUP BY category.name
+      ORDER BY revenue DESC
+    numeric_tolerance: 0.01
 
   - id: chinook_average_invoice_by_country
     database: chinook
@@ -60,4 +91,11 @@ cases:
     expected_sql_contains:
       - invoices
       - AVG
+    golden_sql: |
+      SELECT BillingCountry AS country, ROUND(AVG(Total), 2) AS average_invoice_value
+      FROM invoices
+      WHERE BillingCountry IS NOT NULL
+      GROUP BY BillingCountry
+      ORDER BY average_invoice_value DESC
+    numeric_tolerance: 0.01
     online_only: true

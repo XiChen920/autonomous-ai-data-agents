@@ -21,6 +21,7 @@ from src.auth.access_control import AccessControl, AccessControlError
 from src.db.connector import DatabaseQueryError
 from src.db.registry import DatabaseRegistry, DatabaseRegistryError
 from src.db.sql_guard import UnsafeSQLError
+from src.observability.analysis_logger import AnalysisLogError, AnalysisLogger
 from src.visualization.chart_factory import ChartCreationError
 
 
@@ -78,6 +79,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Grant the added database to a user. Repeat this option for multiple users.",
     )
+    parser.add_argument(
+        "--feedback-run-id",
+        help="Save feedback for a previous analysis run id.",
+    )
+    parser.add_argument(
+        "--feedback-rating",
+        choices=["correct", "partially correct", "incorrect"],
+        help="Feedback rating for --feedback-run-id.",
+    )
+    parser.add_argument(
+        "--feedback-comment",
+        default="",
+        help="Optional comment for --feedback-run-id.",
+    )
     return parser
 
 
@@ -109,6 +124,12 @@ def require_database_add_args(parser: argparse.ArgumentParser, args: argparse.Na
     ]
     if missing:
         parser.error(f"--add-database requires: {', '.join(missing)}")
+
+
+# Validates required arguments for feedback submission.
+def require_feedback_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if not args.feedback_rating:
+        parser.error("--feedback-run-id requires --feedback-rating.")
 
 
 # Adds or updates a database registry entry and optionally grants user access.
@@ -150,6 +171,20 @@ def add_database_from_cli(args: argparse.Namespace) -> int:
     return 0
 
 
+# Saves user feedback against a logged analysis run.
+def add_feedback_from_cli(args: argparse.Namespace) -> int:
+    logger = AnalysisLogger()
+    updated_record = logger.record_feedback(
+        run_id=args.feedback_run_id,
+        rating=args.feedback_rating,
+        comment=args.feedback_comment,
+        user=args.user or "",
+    )
+    print(f"Feedback saved for run: {updated_record['run_id']}")
+    print(f"Rating: {updated_record['user_feedback']['rating']}")
+    return 0
+
+
 # Chooses online or offline analysis from current and legacy CLI arguments.
 def should_use_openai(parser: argparse.ArgumentParser, args: argparse.Namespace) -> bool:
     if args.offline and args.mode == "online":
@@ -166,6 +201,7 @@ def print_pipeline_result(result, preview_rows: int) -> None:
     print(f"Database: {result.database}")
     print(f"Question: {analysis.question}")
     print(f"SQL source: {analysis.sql_source}")
+    print(f"Run id: {result.run_id}")
 
     print("\nGenerated SQL:")
     print(analysis.sql)
@@ -201,6 +237,14 @@ def main() -> int:
         try:
             return add_database_from_cli(args)
         except (AccessControlError, DatabaseRegistryError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    if args.feedback_run_id:
+        require_feedback_args(parser, args)
+        try:
+            return add_feedback_from_cli(args)
+        except AnalysisLogError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
 

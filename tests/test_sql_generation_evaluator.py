@@ -7,6 +7,7 @@ from src.tools.sql_generation_evaluator import (
     DEFAULT_CASES_PATH,
     LLM_SQL_ACCURACY_LIMITATION,
     SQLGenerationEvalCase,
+    compare_result_dataframes,
     evaluate_analysis_result,
     load_eval_cases,
     normalize_identifier,
@@ -76,11 +77,38 @@ def test_sql_generation_eval_accepts_normalized_llm_column_aliases() -> None:
     assert evaluate_analysis_result(case, result) == ()
 
 
+# Verifies display-name suffixes from LLM aliases can match shorter expected columns.
+def test_sql_generation_eval_accepts_name_suffix_aliases() -> None:
+    assert normalize_identifier("category_name") == normalize_identifier("category")
+
+
+# Verifies golden result comparison supports exact text and numeric tolerance.
+def test_sql_generation_eval_compares_golden_result_values_with_tolerance() -> None:
+    expected = pd.DataFrame(
+        [{"country": "USA", "total_sales": 523.06}]
+    )
+    actual = pd.DataFrame(
+        [{"Country": "USA", "TotalSales": 523.061}]
+    )
+    mismatched = pd.DataFrame(
+        [{"Country": "Canada", "TotalSales": 100.0}]
+    )
+
+    assert compare_result_dataframes(expected, actual, numeric_tolerance=0.01) == ()
+    failures = compare_result_dataframes(expected, mismatched, numeric_tolerance=0.01)
+    assert failures
+    assert "Golden result value mismatch" in failures[0]
+
+
 # Verifies offline evaluation runs deterministic sample cases without OpenAI.
 def test_sql_generation_eval_offline_runs_supported_cases_and_skips_online_only() -> None:
     results = run_evaluation(DEFAULT_CASES_PATH, mode="offline", row_limit=5)
     failed_results = [result for result in results if result.status == "failed"]
+    passed_results = [result for result in results if result.status == "passed"]
 
     assert failed_results == []
-    assert any(result.status == "passed" for result in results)
+    assert passed_results
+    assert all(result.execution_success for result in passed_results)
+    assert all(result.result_accuracy_success for result in passed_results)
+    assert all(not result.invalid_sql for result in passed_results)
     assert any(result.status == "skipped" for result in results)

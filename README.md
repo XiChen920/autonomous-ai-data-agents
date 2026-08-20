@@ -109,7 +109,15 @@ Use a smaller returned row limit:
 venv\Scripts\python.exe sql_generation_evaluator.py --mode online --limit 5
 ```
 
-### 9. Stop the Streamlit Server
+### 9. Save Feedback from CLI
+
+Use the `Run id` printed by a previous CLI analysis:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --feedback-run-id your_run_id_here --feedback-rating incorrect --feedback-comment "The result used the wrong grouping."
+```
+
+### 10. Stop the Streamlit Server
 
 Press:
 
@@ -359,7 +367,30 @@ The system includes several safety checks:
 - A row limit is added to prevent very large accidental result sets.
 - Irrelevant questions are rejected before SQL generation.
 
-### 12. Testing and Evaluation
+### 12. Logging and Feedback
+
+Each pipeline run is logged to:
+
+```text
+outputs/logs/analysis_runs.json
+```
+
+Each log record stores:
+
+- User
+- Database
+- Question
+- Generated SQL
+- SQL source
+- Error message
+- Row count
+- Chart type
+- Latency
+- User feedback
+
+The Streamlit UI can save feedback after a result is shown. The CLI can also save feedback with `--feedback-run-id`. This makes it possible to trace root causes when a user says a result is wrong.
+
+### 13. Testing and Evaluation
 
 The automated tests cover:
 
@@ -373,14 +404,17 @@ The automated tests cover:
 - Analysis Agent offline behavior
 - Invalid question rejection
 - Online tool-calling SQL repair behavior
+- SQL-generation execution accuracy and result accuracy checks
+- Golden SQL and golden DataFrame comparison with numeric tolerance
+- Analysis run logging and user feedback updates
 - Visualization Agent chart generation
 - End-to-end pipeline
 - New user plus new database access
 - Starter SQL-generation evaluation harness
 
-The SQL-generation evaluator is intentionally a starter benchmark. It checks execution success, expected result columns, minimum row count, and important SQL fragments, but it is not yet a large-scale accuracy evaluation for OpenAI-generated SQL.
+The SQL-generation evaluator is intentionally a starter benchmark. It checks execution success, result accuracy, expected result columns, minimum row count, important SQL fragments, golden SQL output, golden DataFrame values, invalid SQL rate, and repair success rate. It is still not a large-scale accuracy evaluation for OpenAI-generated SQL.
 
-### 13. Project Structure
+### 14. Project Structure
 
 ```text
 autonomous-ai-data-agents/
@@ -421,6 +455,9 @@ autonomous-ai-data-agents/
       schema_reader.py
       sql_guard.py
 
+    observability/
+      analysis_logger.py
+
     retrieval/
       schema_metadata_index.py
 
@@ -442,16 +479,18 @@ autonomous-ai-data-agents/
   tests/
     test_foundation.py
     test_analysis_agent.py
+    test_observability.py
     test_semantic_schema_retrieval.py
     test_visualization_agent.py
     test_sql_generation_evaluator.py
 
   outputs/
     charts/
+    logs/
     reports/
 ```
 
-### 14. Recommended Live Demo Flow
+### 15. Recommended Live Demo Flow
 
 1. Start Streamlit.
 2. Log in as `bob`.
@@ -466,7 +505,7 @@ autonomous-ai-data-agents/
 11. Test an invalid question such as `Tell me a joke about pizza`.
 12. Optionally show CLI or automated tests.
 
-### 15. Troubleshooting
+### 16. Troubleshooting
 
 If Streamlit asks for an email on first launch, press Enter to skip it.
 

@@ -126,6 +126,7 @@ def test_analysis_agent_openai_tool_loop_repairs_sql_after_execution_error(monke
         for call in fake_client.responses.calls
         if isinstance(call.get("input"), list)
         for tool_output in call["input"]
+        if tool_output.get("type") == "function_call_output"
     ]
     tool_output_text = "\n".join(item["output"] for item in tool_outputs)
 
@@ -136,6 +137,12 @@ def test_analysis_agent_openai_tool_loop_repairs_sql_after_execution_error(monke
     assert '"ok": false' in tool_output_text
     assert "MissingColumn" in tool_output_text
     assert '"ok": true' in tool_output_text
+    assert result.tool_call_count == 3
+    assert result.sql_execution_attempts == 3
+    assert result.sql_execution_failures == 1
+    assert result.sql_repair_count == 1
+    assert result.sql_repair_succeeded
+    assert all("previous_response_id" not in call for call in fake_client.responses.calls)
 
 
 # Verifies a supported offline sample question returns expected data.

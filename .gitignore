@@ -22,6 +22,7 @@ Thumbs.db
 # Generated analysis outputs
 outputs/charts/
 outputs/reports/
+outputs/logs/
 
 # Generated presentation review artifacts
 .tmp_ppt_review/

@@ -200,6 +200,24 @@ class InvalidAnalysisQuestionError(AnalysisAgentError):
 
 
 @dataclass
+class SQLGenerationMetrics:
+    tool_call_count: int = 0
+    sql_execution_attempts: int = 0
+    sql_execution_failures: int = 0
+    sql_execution_successes: int = 0
+
+    # Counts SQL execution failures that required the model to repair a query.
+    @property
+    def sql_repair_count(self) -> int:
+        return self.sql_execution_failures
+
+    # Reports whether at least one failed SQL attempt was later repaired successfully.
+    @property
+    def sql_repair_succeeded(self) -> bool:
+        return self.sql_execution_failures > 0 and self.sql_execution_successes > 0
+
+
+@dataclass
 class AnalysisResult:
     database_name: str
     question: str
@@ -211,6 +229,11 @@ class AnalysisResult:
     retrieved_tables: tuple[str, ...] = ()
     retrieved_columns: tuple[str, ...] = ()
     retrieved_sample_questions: tuple[str, ...] = ()
+    tool_call_count: int = 0
+    sql_execution_attempts: int = 0
+    sql_execution_failures: int = 0
+    sql_repair_count: int = 0
+    sql_repair_succeeded: bool = False
 
     # Returns the number of rows produced by the analysis query.
     @property
@@ -244,6 +267,7 @@ class DataAnalysisAgent:
         self.sql_generator = sql_generator
         self.openai_client = openai_client
         self.max_tool_iterations = max_tool_iterations
+        self._sql_generation_metrics = SQLGenerationMetrics()
 
     # Runs the full analysis flow from question to DataFrame and summary.
     def analyze(
@@ -272,6 +296,7 @@ class DataAnalysisAgent:
             schema_text,
             database_path=database_path,
         )
+        metrics = self._sql_generation_metrics
         safe_sql = ensure_limit(generated_sql, limit=self.row_limit)
         dataframe = self.connector.run_query(database_path, safe_sql)
         summary = self.summarize(question, dataframe)
@@ -287,6 +312,11 @@ class DataAnalysisAgent:
             retrieved_tables=retrieval_result.retrieved_tables,
             retrieved_columns=retrieval_result.retrieved_columns,
             retrieved_sample_questions=retrieval_result.retrieved_sample_questions,
+            tool_call_count=metrics.tool_call_count,
+            sql_execution_attempts=metrics.sql_execution_attempts,
+            sql_execution_failures=metrics.sql_execution_failures,
+            sql_repair_count=metrics.sql_repair_count,
+            sql_repair_succeeded=metrics.sql_repair_succeeded,
         )
 
     # Chooses injected SQL, OpenAI SQL, or offline sample-template SQL.
@@ -297,6 +327,7 @@ class DataAnalysisAgent:
         schema_text: str,
         database_path: str | Path | None = None,
     ) -> tuple[str, str]:
+        self._sql_generation_metrics = SQLGenerationMetrics()
         if self.sql_generator is not None:
             return self.sql_generator(database_name, question, schema_text), "injected"
 
@@ -313,6 +344,7 @@ class DataAnalysisAgent:
                 )
             except Exception as openai_error:
                 try:
+                    self._sql_generation_metrics = SQLGenerationMetrics()
                     fallback_sql = self._generate_fallback_sql(database_name, question, schema_text)
                     return fallback_sql, "fallback"
                 except SQLGenerationError as fallback_error:
@@ -340,10 +372,13 @@ class DataAnalysisAgent:
         tools = self._build_analysis_tools()
         instructions = self._build_tool_calling_instructions()
         prompt = self._build_tool_calling_prompt(database_name, question)
+        conversation_input: list[dict[str, Any]] = [
+            {"role": "user", "content": prompt}
+        ]
         response = client.responses.create(
             model=self.model,
             instructions=instructions,
-            input=prompt,
+            input=conversation_input,
             tools=tools,
             parallel_tool_calls=False,
         )
@@ -361,10 +396,12 @@ class DataAnalysisAgent:
                     )
                     for tool_call in tool_calls
                 ]
+                conversation_input.extend(self._response_output_as_input_items(response))
+                conversation_input.extend(tool_outputs)
                 response = client.responses.create(
                     model=self.model,
-                    previous_response_id=response.id,
-                    input=tool_outputs,
+                    instructions=instructions,
+                    input=conversation_input,
                     tools=tools,
                     parallel_tool_calls=False,
                 )
@@ -376,10 +413,16 @@ class DataAnalysisAgent:
                 return final_sql
 
             last_error = str(preflight_result["error"])
+            conversation_input.append(
+                {
+                    "role": "user",
+                    "content": self._build_repair_prompt(final_sql, preflight_result),
+                }
+            )
             response = client.responses.create(
                 model=self.model,
-                previous_response_id=response.id,
-                input=self._build_repair_prompt(final_sql, preflight_result),
+                instructions=instructions,
+                input=conversation_input,
                 tools=tools,
                 parallel_tool_calls=False,
             )
@@ -515,6 +558,31 @@ Revise the SQL using the available tools. Call run_sql again before returning fi
             if self._tool_item_value(item, "type") == "function_call"
         ]
 
+    # Converts response output items into stateless input items for ZDR-compatible loops.
+    def _response_output_as_input_items(self, response) -> list[dict[str, Any]]:
+        input_items: list[dict[str, Any]] = []
+        for item in getattr(response, "output", None) or []:
+            item_type = self._tool_item_value(item, "type")
+            if item_type != "function_call":
+                continue
+
+            input_item = {
+                "type": "function_call",
+                "call_id": self._tool_item_value(item, "call_id", ""),
+                "name": self._tool_item_value(item, "name", ""),
+                "arguments": self._tool_item_value(item, "arguments", "{}"),
+            }
+            item_id = self._tool_item_value(item, "id")
+            status = self._tool_item_value(item, "status")
+            if item_id:
+                input_item["id"] = item_id
+            if status:
+                input_item["status"] = status
+
+            input_items.append(input_item)
+
+        return input_items
+
     # Handles both SDK objects and lightweight dicts used in tests.
     def _tool_item_value(self, item: Any, key: str, default: Any = None) -> Any:
         if isinstance(item, dict):
@@ -532,6 +600,7 @@ Revise the SQL using the available tools. Call run_sql again before returning fi
         tool_name = self._tool_item_value(tool_call, "name", "")
         call_id = self._tool_item_value(tool_call, "call_id", "")
         arguments_text = self._tool_item_value(tool_call, "arguments", "{}")
+        self._sql_generation_metrics.tool_call_count += 1
 
         try:
             arguments = self._parse_tool_arguments(arguments_text)
@@ -602,12 +671,15 @@ Revise the SQL using the available tools. Call run_sql again before returning fi
 
     # Executes SQL as a tool call and returns a small observation for the model.
     def _run_sql_tool(self, database_path: str | Path, sql: str) -> dict[str, Any]:
+        self._sql_generation_metrics.sql_execution_attempts += 1
         try:
             safe_sql = ensure_limit(sql, limit=self.row_limit)
             dataframe = self.connector.run_query(database_path, safe_sql)
         except Exception as exc:
+            self._sql_generation_metrics.sql_execution_failures += 1
             return {"ok": False, "error": str(exc), "sql": sql}
 
+        self._sql_generation_metrics.sql_execution_successes += 1
         preview_json = dataframe.head(5).to_json(orient="records", date_format="iso")
         return {
             "ok": True,
