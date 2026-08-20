@@ -9,6 +9,7 @@ from src.tools.sql_generation_evaluator import (
     SQLGenerationEvalCase,
     evaluate_analysis_result,
     load_eval_cases,
+    normalize_identifier,
     run_evaluation,
 )
 
@@ -41,6 +42,37 @@ def test_sql_generation_eval_checks_expected_result_shape() -> None:
         sql_source="injected",
     )
 
+    assert evaluate_analysis_result(case, result) == ()
+
+
+# Verifies reasonable LLM aliases match the expected benchmark column names.
+def test_sql_generation_eval_accepts_normalized_llm_column_aliases() -> None:
+    case = SQLGenerationEvalCase(
+        id="alias_case",
+        database="chinook",
+        question="Which countries have the highest average invoice value?",
+        expected_columns=("country", "average_invoice_value", "total_sales"),
+        min_rows=1,
+        expected_sql_contains=("invoices", "AVG"),
+    )
+    result = AnalysisResult(
+        database_name="chinook",
+        question=case.question,
+        sql=(
+            "SELECT BillingCountry AS Country, AVG(Total) AS AvgInvoiceValue, "
+            "SUM(Total) AS TotalSales FROM invoices"
+        ),
+        summary="Returned one row.",
+        dataframe=pd.DataFrame(
+            [{"Country": "USA", "AvgInvoiceValue": 5.65, "TotalSales": 523.06}]
+        ),
+        sql_source="openai",
+    )
+
+    assert normalize_identifier("TotalSales") == normalize_identifier("total_sales")
+    assert normalize_identifier("AvgInvoiceValue") == normalize_identifier(
+        "average_invoice_value"
+    )
     assert evaluate_analysis_result(case, result) == ()
 
 

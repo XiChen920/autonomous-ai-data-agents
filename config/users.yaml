@@ -2,12 +2,15 @@ users:
   alice:
     allowed_databases:
     - chinook
+    - employee
     - northwind
   bob:
     allowed_databases:
+    - employee
     - sakila
   admin:
     allowed_databases:
     - chinook
+    - employee
     - northwind
     - sakila

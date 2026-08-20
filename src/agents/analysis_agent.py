@@ -1,15 +1,18 @@
 """Data Analysis Agent.
 
 This agent validates whether a question is relevant to the selected database,
-generates SQL through OpenAI or exact offline sample-question templates, checks
-SQL safety, executes the query, and returns a structured analysis result.
+retrieves the most relevant schema metadata, generates SQL through OpenAI or
+exact offline sample-question templates, checks SQL safety, executes the query,
+and returns a structured analysis result.
 """
 
 import os
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -17,6 +20,7 @@ from dotenv import load_dotenv
 from src.db.connector import SQLiteConnector
 from src.db.schema_reader import SchemaReader
 from src.db.sql_guard import ensure_limit
+from src.retrieval.schema_metadata_index import SemanticSchemaRetriever
 
 
 SQLGenerator = Callable[[str, str, str], str]
@@ -203,6 +207,10 @@ class AnalysisResult:
     summary: str
     dataframe: pd.DataFrame
     sql_source: str
+    schema_context: str = ""
+    retrieved_tables: tuple[str, ...] = ()
+    retrieved_columns: tuple[str, ...] = ()
+    retrieved_sample_questions: tuple[str, ...] = ()
 
     # Returns the number of rows produced by the analysis query.
     @property
@@ -220,14 +228,22 @@ class DataAnalysisAgent:
         row_limit: int = 100,
         use_openai: bool = True,
         sql_generator: SQLGenerator | None = None,
+        openai_client: Any | None = None,
+        schema_retriever: SemanticSchemaRetriever | None = None,
+        max_tool_iterations: int = 6,
     ) -> None:
         load_dotenv()
         self.connector = connector or SQLiteConnector()
         self.schema_reader = schema_reader or SchemaReader(self.connector)
+        self.schema_retriever = schema_retriever or SemanticSchemaRetriever(
+            schema_reader=self.schema_reader
+        )
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
         self.row_limit = row_limit
         self.use_openai = use_openai
         self.sql_generator = sql_generator
+        self.openai_client = openai_client
+        self.max_tool_iterations = max_tool_iterations
 
     # Runs the full analysis flow from question to DataFrame and summary.
     def analyze(
@@ -235,10 +251,27 @@ class DataAnalysisAgent:
         database_path: str | Path,
         database_name: str,
         question: str,
+        database_description: str = "",
     ) -> AnalysisResult:
-        schema_text = self.schema_reader.get_schema_text(database_path)
-        self._validate_question_relevance(question, schema_text)
-        generated_sql, sql_source = self.generate_sql(database_name, question, schema_text)
+        full_schema_text = self.schema_reader.get_schema_text(database_path)
+        retrieval_result = self.schema_retriever.retrieve(
+            database_name=database_name,
+            database_path=database_path,
+            question=question,
+            database_description=database_description,
+            sample_questions=sorted(FALLBACK_SQL_TEMPLATES.get(database_name, {})),
+        )
+        schema_text = retrieval_result.schema_text
+        self._validate_question_relevance(
+            question,
+            f"{full_schema_text}\n{schema_text}",
+        )
+        generated_sql, sql_source = self.generate_sql(
+            database_name,
+            question,
+            schema_text,
+            database_path=database_path,
+        )
         safe_sql = ensure_limit(generated_sql, limit=self.row_limit)
         dataframe = self.connector.run_query(database_path, safe_sql)
         summary = self.summarize(question, dataframe)
@@ -250,6 +283,10 @@ class DataAnalysisAgent:
             summary=summary,
             dataframe=dataframe,
             sql_source=sql_source,
+            schema_context=schema_text,
+            retrieved_tables=retrieval_result.retrieved_tables,
+            retrieved_columns=retrieval_result.retrieved_columns,
+            retrieved_sample_questions=retrieval_result.retrieved_sample_questions,
         )
 
     # Chooses injected SQL, OpenAI SQL, or offline sample-template SQL.
@@ -258,35 +295,99 @@ class DataAnalysisAgent:
         database_name: str,
         question: str,
         schema_text: str,
+        database_path: str | Path | None = None,
     ) -> tuple[str, str]:
         if self.sql_generator is not None:
             return self.sql_generator(database_name, question, schema_text), "injected"
 
         if self.use_openai and os.getenv("OPENAI_API_KEY"):
             try:
-                return self._generate_sql_with_openai(database_name, question, schema_text), "openai"
-            except Exception:
-                fallback_sql = self._generate_fallback_sql(database_name, question, schema_text)
-                return fallback_sql, "fallback"
+                return (
+                    self._generate_sql_with_openai(
+                        database_path,
+                        database_name,
+                        question,
+                        schema_text,
+                    ),
+                    "openai",
+                )
+            except Exception as openai_error:
+                try:
+                    fallback_sql = self._generate_fallback_sql(database_name, question, schema_text)
+                    return fallback_sql, "fallback"
+                except SQLGenerationError as fallback_error:
+                    raise SQLGenerationError(
+                        "OpenAI SQL generation failed and no offline fallback template matched. "
+                        f"OpenAI error: {openai_error}"
+                    ) from fallback_error
 
         return self._generate_fallback_sql(database_name, question, schema_text), "fallback"
 
-    # Calls OpenAI to generate a SQLite SELECT query from schema and question.
+    # Runs an OpenAI tool-calling loop over retrieved schema context.
     def _generate_sql_with_openai(
         self,
+        database_path: str | Path | None,
         database_name: str,
         question: str,
         schema_text: str,
     ) -> str:
         from openai import OpenAI
 
-        client = OpenAI()
-        prompt = self._build_sql_prompt(database_name, question, schema_text)
+        if database_path is None:
+            raise SQLGenerationError("database_path is required for OpenAI tool-calling SQL generation.")
+
+        client = self.openai_client or OpenAI()
+        tools = self._build_analysis_tools()
+        instructions = self._build_tool_calling_instructions()
+        prompt = self._build_tool_calling_prompt(database_name, question)
         response = client.responses.create(
             model=self.model,
+            instructions=instructions,
             input=prompt,
+            tools=tools,
+            parallel_tool_calls=False,
         )
-        return self._extract_sql(response.output_text)
+
+        last_error = ""
+        for _iteration in range(self.max_tool_iterations):
+            tool_calls = self._response_function_calls(response)
+            if tool_calls:
+                tool_outputs = [
+                    self._execute_tool_call(
+                        tool_call,
+                        database_path=database_path,
+                        database_name=database_name,
+                        schema_text=schema_text,
+                    )
+                    for tool_call in tool_calls
+                ]
+                response = client.responses.create(
+                    model=self.model,
+                    previous_response_id=response.id,
+                    input=tool_outputs,
+                    tools=tools,
+                    parallel_tool_calls=False,
+                )
+                continue
+
+            final_sql = self._extract_sql(response.output_text)
+            preflight_result = self._run_sql_tool(database_path, final_sql)
+            if preflight_result["ok"]:
+                return final_sql
+
+            last_error = str(preflight_result["error"])
+            response = client.responses.create(
+                model=self.model,
+                previous_response_id=response.id,
+                input=self._build_repair_prompt(final_sql, preflight_result),
+                tools=tools,
+                parallel_tool_calls=False,
+            )
+
+        raise SQLGenerationError(
+            "OpenAI tool-calling loop did not produce executable SQL. "
+            f"Last error: {last_error or 'no final SQL returned'}"
+        )
 
     # Builds the prompt that constrains the model to safe SQL output.
     def _build_sql_prompt(self, database_name: str, question: str, schema_text: str) -> str:
@@ -311,6 +412,210 @@ Rules:
 - Use double quotes around table names or column names only when needed.
 - Prefer clear aliases for output columns.
 """.strip()
+
+    # Defines the local analysis tools available to the OpenAI model.
+    def _build_analysis_tools(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "name": "get_schema",
+                "description": "Return the semantically retrieved SQLite schema context as compact text.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+            {
+                "type": "function",
+                "name": "validate_sql",
+                "description": "Validate that a SQL query is a safe read-only SQLite SELECT/WITH query and add LIMIT if needed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sql": {
+                            "type": "string",
+                            "description": "The SQLite SQL query to validate.",
+                        }
+                    },
+                    "required": ["sql"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+            {
+                "type": "function",
+                "name": "run_sql",
+                "description": "Execute a safe read-only SQLite query and return row count, columns, and preview rows.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sql": {
+                            "type": "string",
+                            "description": "The SQLite SELECT/WITH query to execute.",
+                        }
+                    },
+                    "required": ["sql"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        ]
+
+    # Builds developer instructions for the tool-calling SQL agent loop.
+    def _build_tool_calling_instructions(self) -> str:
+        return """
+You are the Data Analysis Agent for a SQLite analytics system.
+Use the provided tools to inspect the retrieved schema context, validate SQL, and test execution.
+Before returning a final answer, call run_sql successfully at least once.
+If run_sql returns an error, revise the SQL and call run_sql again.
+Return exactly one final SQLite SELECT/WITH query after a successful run_sql call.
+Rules:
+- Return SQL only in the final answer.
+- Do not use markdown.
+- Do not explain the query.
+- Do not use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, PRAGMA, or VACUUM.
+- Prefer clear aliases for output columns.
+""".strip()
+
+    # Builds the user prompt for the OpenAI tool-calling loop.
+    def _build_tool_calling_prompt(self, database_name: str, question: str) -> str:
+        return f"""
+Database name:
+{database_name}
+
+User question:
+{question}
+
+Use get_schema first, then generate and test a safe SQLite query.
+The schema tool returns only the database/table/column metadata retrieved as relevant to this question.
+""".strip()
+
+    # Sends final-SQL execution failures back to the model for repair.
+    def _build_repair_prompt(self, final_sql: str, preflight_result: dict[str, Any]) -> str:
+        return f"""
+The final SQL failed preflight execution.
+
+SQL:
+{final_sql}
+
+Error:
+{preflight_result['error']}
+
+Revise the SQL using the available tools. Call run_sql again before returning final SQL.
+""".strip()
+
+    # Extracts function calls from a Responses API result.
+    def _response_function_calls(self, response) -> list[Any]:
+        output_items = getattr(response, "output", None) or []
+        return [
+            item
+            for item in output_items
+            if self._tool_item_value(item, "type") == "function_call"
+        ]
+
+    # Handles both SDK objects and lightweight dicts used in tests.
+    def _tool_item_value(self, item: Any, key: str, default: Any = None) -> Any:
+        if isinstance(item, dict):
+            return item.get(key, default)
+        return getattr(item, key, default)
+
+    # Executes one model-requested analysis tool and formats output for the next model turn.
+    def _execute_tool_call(
+        self,
+        tool_call: Any,
+        database_path: str | Path,
+        database_name: str,
+        schema_text: str,
+    ) -> dict[str, str]:
+        tool_name = self._tool_item_value(tool_call, "name", "")
+        call_id = self._tool_item_value(tool_call, "call_id", "")
+        arguments_text = self._tool_item_value(tool_call, "arguments", "{}")
+
+        try:
+            arguments = self._parse_tool_arguments(arguments_text)
+            output = self._execute_analysis_tool(
+                tool_name,
+                arguments,
+                database_path=database_path,
+                database_name=database_name,
+                schema_text=schema_text,
+            )
+        except Exception as exc:
+            output = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+        return {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json.dumps(output, ensure_ascii=False),
+        }
+
+    # Parses JSON arguments from a model tool call.
+    def _parse_tool_arguments(self, arguments_text: str) -> dict[str, Any]:
+        arguments = json.loads(arguments_text or "{}")
+        if not isinstance(arguments, dict):
+            raise SQLGenerationError("Tool arguments must be a JSON object.")
+        return arguments
+
+    # Dispatches local tool implementations for schema, validation, and execution.
+    def _execute_analysis_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        database_path: str | Path,
+        database_name: str,
+        schema_text: str,
+    ) -> dict[str, Any]:
+        if tool_name == "get_schema":
+            return {
+                "ok": True,
+                "database_name": database_name,
+                "schema_text": schema_text,
+            }
+
+        if tool_name == "validate_sql":
+            sql = self._required_sql_argument(arguments)
+            return self._validate_sql_tool(sql)
+
+        if tool_name == "run_sql":
+            sql = self._required_sql_argument(arguments)
+            return self._run_sql_tool(database_path, sql)
+
+        return {"ok": False, "error": f"Unknown tool: {tool_name}"}
+
+    # Reads and validates the required SQL argument for SQL tools.
+    def _required_sql_argument(self, arguments: dict[str, Any]) -> str:
+        sql = arguments.get("sql")
+        if not isinstance(sql, str) or not sql.strip():
+            raise SQLGenerationError("Tool argument 'sql' is required.")
+        return sql
+
+    # Runs only SQL safety validation and reports errors as tool output.
+    def _validate_sql_tool(self, sql: str) -> dict[str, Any]:
+        try:
+            safe_sql = ensure_limit(sql, limit=self.row_limit)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "sql": sql}
+
+        return {"ok": True, "safe_sql": safe_sql}
+
+    # Executes SQL as a tool call and returns a small observation for the model.
+    def _run_sql_tool(self, database_path: str | Path, sql: str) -> dict[str, Any]:
+        try:
+            safe_sql = ensure_limit(sql, limit=self.row_limit)
+            dataframe = self.connector.run_query(database_path, safe_sql)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "sql": sql}
+
+        preview_json = dataframe.head(5).to_json(orient="records", date_format="iso")
+        return {
+            "ok": True,
+            "safe_sql": safe_sql,
+            "row_count": len(dataframe),
+            "columns": [str(column) for column in dataframe.columns],
+            "preview_rows": json.loads(preview_json),
+        }
 
     # Extracts the first SELECT/WITH query from a model response.
     def _extract_sql(self, text: str) -> str:

@@ -25,7 +25,9 @@ outputs/reports/
 
 # Generated presentation review artifacts
 .tmp_ppt_review/
+.tmp_ppt_edit/
 presentation/*/
+*.pptx.inspect.ndjson
 
 # SQLite temporary files
 *.db-journal

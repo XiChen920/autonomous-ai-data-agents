@@ -173,6 +173,12 @@ def print_pipeline_result(result, preview_rows: int) -> None:
     print("\nSummary:")
     print(analysis.summary)
 
+    if analysis.retrieved_tables:
+        print("\nRetrieved schema context:")
+        print(f"Tables: {', '.join(analysis.retrieved_tables)}")
+        if analysis.retrieved_columns:
+            print(f"Columns: {', '.join(analysis.retrieved_columns[:12])}")
+
     print(f"\nRows returned: {analysis.row_count}")
     if not analysis.dataframe.empty:
         print("\nPreview:")

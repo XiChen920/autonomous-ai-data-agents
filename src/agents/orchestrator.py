@@ -38,6 +38,7 @@ class AgentOrchestrator:
             database_path=database_info["path"],
             database_name=database,
             question=question,
+            database_description=str(database_info.get("description", "")),
         )
 
         return PipelineResult(

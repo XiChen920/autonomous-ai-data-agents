@@ -1,78 +1,386 @@
 # Autonomous AI Agents for Data Analysis and Visualization
 
-## 1. Project Overview
+## Part 1. Quick Start and Commands
 
-This project implements a two-agent data analysis system for SQLite databases.
-Users can control the system through either a Streamlit UI or a CLI.
+This project is a two-agent system for SQLite data analysis and company-style visualization.
+It can be run from either a Streamlit UI or a command-line interface.
 
-Start the Streamlit UI:
+Run the commands below from the project root.
+
+### 1. Start the Streamlit UI
 
 ```powershell
-cd C:\Users\win11\PycharmProjects\autonomous-ai-data-agents
 venv\Scripts\python.exe -m streamlit run streamlit_app.py
 ```
 
-Then open:
-
-```text
-http://localhost:8501
-```
-
-Run the CLI:
+### 2. Run the CLI in Offline Mode
 
 ```powershell
-cd C:\Users\win11\PycharmProjects\autonomous-ai-data-agents
-venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --offline --limit 5
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --mode offline --chart bar --limit 5 --preview-rows 5
 ```
 
-The system contains two main agents:
+### 3. Run the CLI in Online OpenAI Mode
 
-1. Data Analysis Agent
-   - Reads the selected database schema.
-   - Checks whether the user question is relevant to the database.
-   - Generates SQL using either OpenAI or exact offline sample-question templates.
-   - Validates that the SQL is safe.
-   - Runs the query against SQLite and returns a pandas DataFrame.
+Online mode assumes `.env` already contains a valid `OPENAI_API_KEY`.
 
-2. Data Visualization Agent
-   - Receives the analysis result.
-   - Selects or applies the requested chart type.
-   - Applies the company chart style.
-   - Saves a PNG chart and CSV output.
+```powershell
+venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Which countries have the highest average invoice value?" --mode online --chart bar --limit 10 --preview-rows 10
+```
 
-The project is designed around controllability, user restrictions, simple database integration, and automated testing.
+### 4. Test User Access Restriction
 
-## 2. Requirement Mapping
+```powershell
+venv\Scripts\python.exe cli_app.py --user bob --db chinook --question "Show total sales by country" --mode offline
+```
 
-| Assignment requirement | How this project satisfies it |
+Expected result:
+
+```text
+Error: User 'bob' is not allowed to access database 'chinook'.
+```
+
+### 5. Add a New Database from CLI
+
+```powershell
+venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin
+```
+
+Grant multiple users:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin --grant-user alice
+```
+
+Run a new database with online mode:
+
+```powershell
+venv\Scripts\python.exe cli_app.py --user admin --db custom_sales --question "Show total amount by region" --mode online --limit 10
+```
+
+### 6. Run OpenAI Diagnostics
+
+```powershell
+venv\Scripts\python.exe openai_diagnostics.py
+```
+
+List available models:
+
+```powershell
+venv\Scripts\python.exe openai_diagnostics.py --list-models
+```
+
+Only check completion:
+
+```powershell
+venv\Scripts\python.exe openai_diagnostics.py --check-completion
+```
+
+### 7. Run Automated Tests
+
+Show test names:
+
+```powershell
+venv\Scripts\python.exe -m pytest -v
+```
+
+Run one test file:
+
+```powershell
+venv\Scripts\python.exe -m pytest tests\test_analysis_agent.py -v
+```
+
+### 8. Run SQL Generation Evaluation
+
+Offline starter eval:
+
+```powershell
+venv\Scripts\python.exe sql_generation_evaluator.py --mode offline
+```
+
+Online OpenAI eval:
+
+```powershell
+venv\Scripts\python.exe sql_generation_evaluator.py --mode online
+```
+
+Use a smaller returned row limit:
+
+```powershell
+venv\Scripts\python.exe sql_generation_evaluator.py --mode online --limit 5
+```
+
+### 9. Stop the Streamlit Server
+
+Press:
+
+```text
+Ctrl + C
+```
+
+## Part 2. Project Explanation
+
+### 1. Project Overview
+
+This project implements a controllable two-agent workflow for analyzing SQLite databases and generating visual outputs. Users can run it through Streamlit for a live demo or through the CLI for scripted execution.
+
+The system is designed around four assignment requirements:
+
+- User controllability
+- User access restriction
+- Easy database integration
+- Automated evaluation examples
+
+### 2. Requirement Mapping
+
+| Assignment requirement | Project implementation |
 | --- | --- |
 | Two distinct AI agents | `DataAnalysisAgent` and `DataVisualizationAgent` |
 | Agents connected | `AgentOrchestrator` runs analysis first, then visualization |
-| Simple UI or CLI | Streamlit UI launched by `streamlit_app.py`; CLI launched by `cli_app.py` |
-| User controllability | Users choose database, question, mode, chart type, row limit, and preview rows |
-| User restriction | `config/users.yaml` limits which databases each user can access |
-| Easy integration | New databases can be added through the Streamlit admin panel, CLI, or `config/databases.yaml` |
-| Automated testing | `pytest` tests in the `tests/` folder |
+| Simple UI or CLI | `streamlit_app.py` and `cli_app.py` |
+| User controllability | User chooses database, question, mode, chart type, row limit, and preview rows |
+| User restriction | `config/users.yaml` controls allowed databases per user |
+| Easy integration | New databases can be added through Streamlit, CLI, or YAML config |
+| Automated testing | `pytest` tests in `tests/` |
 | Live demonstration | Streamlit app at `http://localhost:8501` |
 
-## 3. Architecture
+### 3. Architecture
 
 ```text
-User: Streamlit UI or CLI
+User
+  -> Streamlit UI or CLI
   -> AccessControl
+       checks whether the user can access the selected database
   -> DatabaseRegistry
+       resolves the logical database name to a SQLite file
   -> DataAnalysisAgent
-       -> SchemaReader
-       -> OpenAI SQL generation or offline fallback SQL
-       -> SQLGuard
-       -> SQLiteConnector
+       builds a metadata index from database/table/column/sample-question text
+       embeds the user question and retrieves relevant schema context
+       validates question relevance
+       generates SQL through an OpenAI tool-calling loop or offline templates
+       checks SQL safety
+       queries SQLite
+       returns AnalysisResult
   -> DataVisualizationAgent
-       -> ChartFactory
-       -> CompanyStyle
-  -> outputs/charts/*.png and outputs/charts/*.csv
+       receives AnalysisResult.dataframe
+       creates a chart using company style
+       saves chart PNG and CSV
+  -> User receives SQL, summary, table preview, chart, and downloadable outputs
 ```
 
-## 4. Project Structure
+### 4. Main Workflow
+
+```text
+1. User selects username.
+2. System loads allowed databases for that user.
+3. User selects database, mode, chart type, row limit, and question.
+4. Orchestrator checks access permission.
+5. Data Analysis Agent retrieves relevant schema metadata before SQL generation.
+6. Data Analysis Agent creates safe SQL and returns a DataFrame.
+7. Data Visualization Agent creates a company-style chart.
+8. UI or CLI displays the result.
+```
+
+### 5. The Two Agents
+
+`DataAnalysisAgent`
+
+- Reads SQLite schema.
+- Builds a metadata index from database descriptions, tables, columns, generated column descriptions, and sample questions.
+- Embeds the user question and retrieves the most relevant database/table/column context.
+- Checks whether the question looks like a database-analysis request.
+- Uses an OpenAI tool-calling loop in online mode to inspect schema, test SQL, and repair execution errors.
+- Uses exact predefined SQL templates in offline mode.
+- Runs SQL safety checks before querying the database.
+- Returns SQL, summary, row count, SQL source, and a pandas DataFrame.
+
+`DataVisualizationAgent`
+
+- Receives the DataFrame from the analysis agent.
+- Chooses or applies the requested chart type.
+- Uses `config/style.yaml` for company colors, size, font, and grid style.
+- Saves chart images and CSV outputs under `outputs/charts/`.
+
+### 6. Online Mode vs Offline Mode
+
+`Online OpenAI`
+
+- Calls the OpenAI API.
+- Gives the model local tools for retrieved schema inspection, SQL validation, and safe SQL execution.
+- Feeds SQL execution errors back to the model so it can repair the query before returning final SQL.
+- Supports flexible custom questions.
+- Required for newly added databases because they have no fixed sample SQL templates.
+
+`Offline fallback`
+
+- Does not call OpenAI.
+- Only accepts predefined sample questions.
+- Maps each sample question to a fixed SQL template.
+- Useful for stable demos and repeatable tests.
+
+The assignment does not require both modes. They are included to balance AI flexibility with demo reliability.
+
+### 7. UI Controls
+
+`Database`
+
+- Selects the SQLite database.
+- Options are filtered by the logged-in user's permission.
+
+`Mode`
+
+- `Online OpenAI` for flexible questions.
+- `Offline fallback` for predefined sample questions.
+
+`Chart`
+
+- `auto`: system chooses a chart.
+- `bar`: category comparison.
+- `line`: trend over time.
+- `scatter`: numeric relationship.
+- `table`: raw table-style result.
+
+`Row limit`
+
+- Controls the maximum rows returned by the SQL query.
+- It limits final returned rows, not necessarily the internal database scan or aggregation.
+
+`Preview rows`
+
+- Controls how many rows are displayed in the UI preview.
+- It does not change SQL, chart generation, or CSV output.
+
+### 8. Databases
+
+The default configured databases are:
+
+`chinook`
+
+- Music store database.
+- Good for sales, invoices, artists, genres, customers, and monthly trends.
+
+Example questions:
+
+```text
+Show total sales by country
+Show artist sales ranking
+Show monthly sales trend
+```
+
+`northwind`
+
+- Sales and orders database.
+- Good for products, revenue, customers, employees, and stock.
+
+Example questions:
+
+```text
+Show top products by revenue
+Show revenue by category
+Show products with low stock
+```
+
+`sakila`
+
+- DVD rental database.
+- Good for films, rentals, payments, stores, actors, and categories.
+
+Example questions:
+
+```text
+Show revenue by category
+Show film rental count
+Show top customers by payment amount
+```
+
+### 9. User Restriction
+
+User permissions are stored in:
+
+```text
+config/users.yaml
+```
+
+Example:
+
+```yaml
+users:
+  alice:
+    allowed_databases:
+      - chinook
+      - northwind
+  bob:
+    allowed_databases:
+      - sakila
+  admin:
+    allowed_databases:
+      - chinook
+      - northwind
+      - sakila
+```
+
+The UI only shows databases the current user can access. The orchestrator also checks permission before running any analysis.
+
+### 10. Easy Database Integration
+
+Database definitions are stored in:
+
+```text
+config/databases.yaml
+```
+
+Example:
+
+```yaml
+databases:
+  my_new_database:
+    path: data/my_new_database.db
+    description: My new sample database
+```
+
+There are three ways to add a database:
+
+- Streamlit admin database management panel
+- CLI `--add-database` command
+- Manual edit of `config/databases.yaml` and `config/users.yaml`
+
+Newly added databases do not automatically appear in the sample-question selector. They should be used with typed custom questions in online mode unless fixed SQL templates are manually added.
+
+### 11. SQL Safety
+
+The system includes several safety checks:
+
+- SQLite connections are read-only.
+- Users can only query authorized databases.
+- Generated SQL must pass `sql_guard.py`.
+- SQL generation receives retrieved schema context instead of blindly using every table and column.
+- Online SQL is preflighted through the tool-calling loop before final execution.
+- Only `SELECT` and `WITH` style read queries are allowed.
+- Dangerous keywords such as `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, and `CREATE` are blocked.
+- A row limit is added to prevent very large accidental result sets.
+- Irrelevant questions are rejected before SQL generation.
+
+### 12. Testing and Evaluation
+
+The automated tests cover:
+
+- User access control
+- Adding and updating users
+- Adding new database integrations
+- Database registry path resolution
+- SQLite schema reading
+- SQL safety checks
+- Semantic schema metadata retrieval
+- Analysis Agent offline behavior
+- Invalid question rejection
+- Online tool-calling SQL repair behavior
+- Visualization Agent chart generation
+- End-to-end pipeline
+- New user plus new database access
+- Starter SQL-generation evaluation harness
+
+The SQL-generation evaluator is intentionally a starter benchmark. It checks execution success, expected result columns, minimum row count, and important SQL fragments, but it is not yet a large-scale accuracy evaluation for OpenAI-generated SQL.
+
+### 13. Project Structure
 
 ```text
 autonomous-ai-data-agents/
@@ -95,20 +403,17 @@ autonomous-ai-data-agents/
     northwind_small.sqlite
     sakila.db
 
-  evals/
-    sql_generation_cases.yaml
-
   src/
     agents/
       analysis_agent.py
       visualization_agent.py
       orchestrator.py
 
-    cli/
-      cli_app.py
-
     auth/
       access_control.py
+
+    cli/
+      cli_app.py
 
     db/
       connector.py
@@ -116,12 +421,16 @@ autonomous-ai-data-agents/
       schema_reader.py
       sql_guard.py
 
-    ui/
-      streamlit_app.py
+    retrieval/
+      schema_metadata_index.py
 
     tools/
       openai_diagnostics.py
       sql_generation_evaluator.py
+      sql_generation_cases.yaml
+
+    ui/
+      streamlit_app.py
 
     utils/
       config_loader.py
@@ -133,6 +442,7 @@ autonomous-ai-data-agents/
   tests/
     test_foundation.py
     test_analysis_agent.py
+    test_semantic_schema_retrieval.py
     test_visualization_agent.py
     test_sql_generation_evaluator.py
 
@@ -141,456 +451,31 @@ autonomous-ai-data-agents/
     reports/
 ```
 
-## 5. Databases
-
-The project uses three sample SQLite databases.
-
-### Chinook
-
-Music store database.
-
-Good for:
-
-- Sales by country
-- Invoice count by country
-- Artist sales ranking
-- Genre track count
-- Monthly sales trend
-
-Example questions:
-
-```text
-Show total sales by country
-Show artist sales ranking
-Show monthly sales trend
-```
-
-### Northwind
-
-Orders, products, customers, employees, and suppliers database.
-
-Good for:
-
-- Product revenue
-- Revenue by customer
-- Revenue by category
-- Low stock products
-- Employee order performance
-
-Example questions:
-
-```text
-Show top products by revenue
-Show revenue by category
-Show products with low stock
-```
-
-### Sakila
-
-DVD rental database.
-
-Good for:
-
-- Revenue by film category
-- Film rental count
-- Customer payment ranking
-- Store rentals
-- Actor film count
-
-Example questions:
-
-```text
-Show revenue by category
-Show film rental count
-Show top customers by payment amount
-```
-
-## 6. Streamlit UI
-
-Start the app:
-
-```powershell
-cd C:\Users\win11\PycharmProjects\autonomous-ai-data-agents
-venv\Scripts\python.exe -m streamlit run streamlit_app.py
-```
-
-Then open:
-
-```text
-http://localhost:8501
-```
-
-### Login / User Workspace
-
-The UI starts with a username input.
-
-Configured users are stored in:
-
-```text
-config/users.yaml
-```
-
-Example:
-
-```text
-alice -> chinook, northwind
-bob -> sakila
-admin -> chinook, northwind, sakila
-```
-
-After login, the database selector only shows databases that the user is allowed to access.
-
-### Admin User Management
-
-Only `admin` sees the user management panel.
-
-Admin can:
-
-- Add a new user.
-- Choose allowed databases.
-- Update an existing user's permissions.
-- See whether the save action created, updated, or changed nothing.
-
-Example messages:
-
-```text
-New user 'charlie' loaded successfully. Permissions: chinook, sakila.
-Updated user 'charlie'. Changes: added northwind; removed sakila.
-No changes for user 'charlie'. Permissions remain: chinook, sakila.
-```
-
-### Admin Database Management
-
-Only `admin` sees the database management panel.
-
-Admin can:
-
-- Add a new SQLite database integration.
-- Update the path or description of an existing database.
-- Grant the new database to selected users.
-- See whether the save action created, updated, or changed nothing.
-
-Newly added databases do not automatically get predefined sample questions. In the UI, users must type a custom question and use `Online OpenAI` mode for those databases.
-
-## 7. UI Controls
-
-### Database
-
-Selects which SQLite database the agents will use.
-
-The options are filtered by the logged-in user's permissions.
-
-### Mode
-
-`Online OpenAI`
-
-- Calls the OpenAI API.
-- The model receives the database schema and user question.
-- The model generates SQL.
-- Best for flexible, new, natural-language questions.
-
-`Offline fallback`
-
-- Does not call OpenAI.
-- Only accepts predefined analysis sample questions.
-- Maps each supported sample question to one fixed SQL template in `analysis_agent.py`.
-- Best for stable testing and live demo safety.
-
-The assignment does not require both online and offline modes. They are included to balance AI flexibility with demo reliability.
-
-### Chart
-
-Controls the visualization type:
-
-- `auto`: the system chooses a chart type.
-- `bar`: good for category comparisons.
-- `line`: good for trends over time.
-- `scatter`: good for numeric relationships.
-- `table`: good for raw tabular results.
-
-If a forced chart type does not fit the data shape, the chart factory falls back safely instead of crashing.
-
-### Row Limit
-
-Controls how many rows the SQL query returns.
-
-Example:
-
-```sql
-LIMIT 10
-```
-
-Important: the database may still scan and aggregate all relevant rows internally. The row limit controls the final returned result size, not necessarily the amount of data considered during aggregation.
-
-### Preview Rows
-
-Controls how many rows are displayed in the UI data preview.
-
-It does not change the SQL query, chart, or CSV output.
-
-Example:
-
-```text
-Row limit = 50
-Preview rows = 10
-```
-
-The system queries up to 50 rows, but the UI preview shows 10.
-
-## 8. CLI Usage
-
-Run a stable offline demo:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Show total sales by country" --mode offline --limit 5
-```
-
-Run online OpenAI mode:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --user alice --db chinook --question "Which countries have the highest average invoice value?" --mode online --limit 10
-```
-
-Test access denial:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --user bob --db chinook --question "Show total sales by country" --mode offline
-```
-
-Expected result:
-
-```text
-Error: User 'bob' is not allowed to access database 'chinook'.
-```
-
-Add or update a database from the CLI:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin
-```
-
-After adding a new database, use online mode and type a custom question:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --user admin --db custom_sales --question "Show total amount by region" --mode online --limit 10
-```
-
-The legacy `--offline` flag still works for built-in sample questions, but `--mode offline` is clearer for demos.
-
-## 9. OpenAI Configuration
-
-Create a `.env` file:
-
-```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_MODEL=gpt-5-mini
-```
-
-Run OpenAI diagnostics:
-
-```powershell
-venv\Scripts\python.exe openai_diagnostics.py
-```
-
-Only list available models:
-
-```powershell
-venv\Scripts\python.exe openai_diagnostics.py --list-models
-```
-
-Only check whether the configured model can respond:
-
-```powershell
-venv\Scripts\python.exe openai_diagnostics.py --check-completion
-```
-
-## 10. Testing
-
-Run all automated tests:
-
-```powershell
-venv\Scripts\python.exe -m pytest -q
-```
-
-Current expected result:
-
-```text
-23 passed
-```
-
-The tests cover:
-
-- User access control
-- Adding and updating user permissions
-- Adding new user permissions
-- Database registry path resolution
-- Adding new database integrations
-- SQLite schema reading
-- SQL safety checks
-- Analysis Agent fallback behavior
-- New databases having no offline sample questions by default
-- Invalid question rejection
-- Visualization Agent chart generation
-- End-to-end analysis and visualization pipeline
-- New user plus new database access through the orchestrator
-- Starter SQL-generation evaluation cases
-
-## 11. SQL Generation Evaluation
-
-The project includes a starter benchmark for generated SQL in `evals/sql_generation_cases.yaml`.
-
-Important limitation: the current automated tests validate the pipeline and a small set of starter cases, but they are not a large-scale accuracy evaluation for OpenAI-generated SQL.
-
-Run deterministic offline eval:
-
-```powershell
-venv\Scripts\python.exe sql_generation_evaluator.py --mode offline
-```
-
-This uses exact sample-question SQL templates and skips cases marked `online_only`.
-
-Run OpenAI SQL-generation eval:
-
-```powershell
-venv\Scripts\python.exe sql_generation_evaluator.py --mode online
-```
-
-The online eval checks whether the OpenAI-generated SQL:
-
-- Actually came from OpenAI, not offline fallback
-- Executes successfully
-- Returns at least the expected number of rows
-- Includes expected output columns
-- Contains important SQL fragments such as key tables or aggregation functions
-
-To turn this into a stronger production-style evaluation, add more golden cases to `evals/sql_generation_cases.yaml`, cover more databases and question types, and track pass rate over time.
-
-## 12. Adding a New Database
-
-There are three supported ways to add a database: Streamlit admin UI, CLI, or manual YAML editing.
-
-### Option A: Streamlit admin UI
-
-1. Log in as `admin`.
-2. Open `Database management` in the sidebar.
-3. Enter:
-   - Database name, for example `custom_sales`
-   - SQLite file path, for example `data/custom_sales.sqlite`
-   - Description, for example `Custom sales analytics database`
-4. Select users to grant access to.
-5. Click `Save database integration`.
-
-After saving, the database selector updates for users who were granted access.
-
-### Option B: CLI
-
-Put the SQLite file in `data/`, then run:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin
-```
-
-Repeat `--grant-user` to grant multiple users:
-
-```powershell
-venv\Scripts\python.exe cli_app.py --add-database --db-name custom_sales --db-path data/custom_sales.sqlite --description "Custom sales analytics database" --grant-user admin --grant-user alice
-```
-
-### Option C: Manual config
-
-1. Put the SQLite file in `data/`.
-
-Example:
-
-```text
-data/my_new_database.db
-```
-
-2. Add it to `config/databases.yaml`.
-
-```yaml
-databases:
-  my_new_database:
-    path: data/my_new_database.db
-    description: My new sample database
-```
-
-3. Give a user permission in `config/users.yaml` or through the admin UI.
-
-```yaml
-users:
-  alice:
-    allowed_databases:
-      - my_new_database
-```
-
-4. Use `Online OpenAI` mode and type a custom question.
-
-Important: newly added databases do not automatically appear in `Example question`, and they do not support `Offline fallback` unless you manually add exact SQL templates to `analysis_agent.py`. This is intentional: sample questions are locked to predefined SQL, while new databases are handled through typed custom questions in online mode.
-
-## 13. Security and Safety
-
-The project includes several safety layers:
-
-- Users can only see authorized databases.
-- The orchestrator checks access before running analysis.
-- SQLite connections are read-only.
-- Agent-generated SQL must pass `sql_guard.py`.
-- Mutating SQL keywords are blocked.
-- Row limits prevent large accidental result sets.
-- Irrelevant user questions are rejected before SQL generation.
-
-## 14. Recommended Live Demo Flow
-
-1. Log in as `bob`.
-2. Show that only `sakila` is available.
-3. Run:
-
-```text
-Show revenue by category
-```
-
-4. Show the two agent status section:
-
-```text
-Data Analysis Agent: analysis task done
-Data Visualization Agent: visualization task done
-```
-
-5. Show chart, SQL, data preview, and download buttons.
-6. Click `Clear result`.
-7. Log in as `admin`.
-8. Add a new user and assign permissions.
-9. Test an invalid question:
-
-```text
-Tell me a joke about pizza
-```
-
-Expected result: the system rejects it as unrelated to database analysis.
-
-## 15. Troubleshooting
+### 14. Recommended Live Demo Flow
+
+1. Start Streamlit.
+2. Log in as `bob`.
+3. Show that only `sakila` is available.
+4. Run `Show revenue by category`.
+5. Show that the Data Analysis Agent finishes first.
+6. Show that the Data Visualization Agent receives the result and creates the chart.
+7. Show SQL, summary, table preview, PNG chart, and CSV download.
+8. Click `Clear result`.
+9. Log in as `admin`.
+10. Add a new user and assign permissions.
+11. Test an invalid question such as `Tell me a joke about pizza`.
+12. Optionally show CLI or automated tests.
+
+### 15. Troubleshooting
 
 If Streamlit asks for an email on first launch, press Enter to skip it.
 
-If `localhost:8501` is blank, stop the server with `Ctrl + C` and restart:
+If the UI is blank, stop the server with `Ctrl + C` and restart it.
 
-```powershell
-venv\Scripts\python.exe -m streamlit run streamlit_app.py
-```
-
-If port 8501 is busy:
-
-```powershell
-venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.port 8502
-```
-
-If online mode fails, switch to `Offline fallback` for a stable demo.
-
-If a model access error appears, run:
+If online mode fails, run:
 
 ```powershell
 venv\Scripts\python.exe openai_diagnostics.py --list-models
 ```
 
-Then update `OPENAI_MODEL` in `.env`.
+Then update `OPENAI_MODEL` in `.env` to a model available to the API key.

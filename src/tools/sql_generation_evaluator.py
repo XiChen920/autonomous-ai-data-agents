@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,15 +17,21 @@ from dotenv import load_dotenv
 
 from src.agents.analysis_agent import AnalysisAgentError, AnalysisResult, DataAnalysisAgent
 from src.db.registry import DatabaseRegistry
-from src.utils.config_loader import PROJECT_ROOT, load_yaml
+from src.utils.config_loader import load_yaml
 
 
-DEFAULT_CASES_PATH = PROJECT_ROOT / "evals" / "sql_generation_cases.yaml"
+DEFAULT_CASES_PATH = Path(__file__).resolve().with_name("sql_generation_cases.yaml")
 VALID_MODES = {"offline", "online"}
 LLM_SQL_ACCURACY_LIMITATION = (
     "Current automated tests validate the pipeline and starter benchmark cases, "
     "but they are not a large-scale accuracy evaluation for OpenAI-generated SQL."
 )
+IDENTIFIER_SYNONYMS = {
+    "avg": "average",
+    "cnt": "count",
+    "num": "number",
+    "qty": "quantity",
+}
 
 
 class SQLGenerationEvaluationError(RuntimeError):
@@ -109,6 +116,15 @@ def _string_tuple(value: object, field_name: str, case_id: str) -> tuple[str, ..
     return tuple(item.strip() for item in value if item.strip())
 
 
+# Normalizes SQL/result identifiers so reasonable LLM aliases can still match.
+def normalize_identifier(identifier: object) -> str:
+    text = str(identifier).strip()
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+    raw_tokens = re.findall(r"[A-Za-z0-9]+", text.lower())
+    tokens = [IDENTIFIER_SYNONYMS.get(token, token) for token in raw_tokens]
+    return "".join(tokens)
+
+
 # Loads golden SQL-generation cases from YAML.
 def load_eval_cases(cases_path: str | Path = DEFAULT_CASES_PATH) -> list[SQLGenerationEvalCase]:
     data = load_yaml(cases_path)
@@ -169,9 +185,12 @@ def evaluate_analysis_result(
             f"Expected at least {case.min_rows} rows, got {result.row_count}."
         )
 
-    actual_columns = {str(column).lower() for column in result.dataframe.columns}
+    actual_columns = {
+        normalize_identifier(column): str(column)
+        for column in result.dataframe.columns
+    }
     for expected_column in case.expected_columns:
-        if expected_column.lower() not in actual_columns:
+        if normalize_identifier(expected_column) not in actual_columns:
             failures.append(
                 f"Expected column '{expected_column}' not found. "
                 f"Actual columns: {list(result.dataframe.columns)}."

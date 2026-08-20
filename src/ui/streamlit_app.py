@@ -457,18 +457,18 @@ def analysis_working_step(use_openai: bool | None = None, sql_source: str | None
     if use_openai is False or sql_source == "fallback":
         return (
             "Data Analysis Agent: offline analysis working",
-            "Checking user access, reading database schema, matching the sample question to an offline SQL template, validating SQL safety, and querying SQLite.",
+            "Checking user access, retrieving relevant schema metadata, matching the sample question to an offline SQL template, validating SQL safety, and querying SQLite.",
         )
 
     if use_openai is True and not os.getenv("OPENAI_API_KEY"):
         return (
             "Data Analysis Agent: fallback analysis working",
-            "Checking user access and reading database schema. OPENAI_API_KEY is missing, so the agent will use the offline sample-question template.",
+            "Checking user access and retrieving relevant schema metadata. OPENAI_API_KEY is missing, so the agent will use the offline sample-question template.",
         )
 
     return (
         "Data Analysis Agent: online analysis working",
-        "Checking user access, reading database schema, asking OpenAI to generate SQL, validating SQL safety, and querying SQLite.",
+        "Checking user access, retrieving relevant schema metadata, using OpenAI tool calls to test and repair SQL, validating SQL safety, and querying SQLite.",
     )
 
 
@@ -477,13 +477,13 @@ def analysis_done_step(analysis) -> tuple[str, str]:
     if analysis.sql_source == "openai":
         return (
             "Data Analysis Agent: online analysis done",
-            f"Generated SQL with OpenAI, validated it, queried SQLite, and returned {analysis.row_count} rows.",
+            f"Retrieved relevant schema, generated and preflighted SQL with OpenAI tools, validated it, queried SQLite, and returned {analysis.row_count} rows.",
         )
 
     if analysis.sql_source == "fallback":
         return (
             "Data Analysis Agent: offline analysis done",
-            f"Matched the question to a predefined SQL template, validated it, queried SQLite, and returned {analysis.row_count} rows.",
+            f"Retrieved relevant schema, matched the question to a predefined SQL template, validated it, queried SQLite, and returned {analysis.row_count} rows.",
         )
 
     return (
@@ -541,6 +541,12 @@ def render_pipeline_result(result, analysis, visualization, preview_rows: int) -
 
     st.subheader("Summary")
     st.write(analysis.summary)
+
+    if analysis.retrieved_tables:
+        with st.expander("Retrieved schema context", expanded=False):
+            st.write(f"Tables: {', '.join(analysis.retrieved_tables)}")
+            if analysis.retrieved_columns:
+                st.write(f"Columns: {', '.join(analysis.retrieved_columns[:20])}")
 
     if visualization is not None:
         st.subheader("Visualization")

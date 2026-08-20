@@ -1,5 +1,6 @@
 """Tests for Data Analysis Agent behavior and orchestrator access failures."""
 
+import json
 import pytest
 
 from src.agents.analysis_agent import (
@@ -11,6 +12,42 @@ from src.agents.analysis_agent import (
 from src.agents.orchestrator import AgentOrchestrator
 from src.auth.access_control import AccessDeniedError
 from src.db.registry import DatabaseRegistry
+
+
+class FakeFunctionCall:
+    # Mimics a Responses API function_call item.
+    def __init__(self, name: str, arguments: dict, call_id: str) -> None:
+        self.type = "function_call"
+        self.name = name
+        self.arguments = json.dumps(arguments)
+        self.call_id = call_id
+
+
+class FakeResponse:
+    # Mimics the response fields used by the analysis agent.
+    def __init__(self, response_id: str, output=None, output_text: str = "") -> None:
+        self.id = response_id
+        self.output = output or []
+        self.output_text = output_text
+
+
+class FakeResponsesClient:
+    # Returns scripted model responses and records tool outputs sent back by the agent.
+    def __init__(self, responses: list[FakeResponse]) -> None:
+        self.responses = list(responses)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise AssertionError("No fake OpenAI responses left.")
+        return self.responses.pop(0)
+
+
+class FakeOpenAIClient:
+    # Provides the .responses.create interface used by OpenAI().
+    def __init__(self, responses: list[FakeResponse]) -> None:
+        self.responses = FakeResponsesClient(responses)
 
 
 # Verifies injected SQL can be executed and limited by the agent.
@@ -42,6 +79,63 @@ def test_analysis_agent_runs_injected_sql_against_chinook() -> None:
     assert result.row_count == 5
     assert list(result.dataframe.columns) == ["country", "total_sales"]
     assert "LIMIT 5" in result.sql
+
+
+# Verifies the online tool loop can observe a SQL error and repair it.
+def test_analysis_agent_openai_tool_loop_repairs_sql_after_execution_error(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    registry = DatabaseRegistry()
+    bad_sql = "SELECT MissingColumn FROM invoices"
+    fixed_sql = """
+        SELECT BillingCountry AS country, ROUND(SUM(Total), 2) AS total_sales
+        FROM invoices
+        GROUP BY BillingCountry
+        ORDER BY total_sales DESC
+    """
+    fake_client = FakeOpenAIClient(
+        [
+            FakeResponse(
+                "response-1",
+                output=[FakeFunctionCall("get_schema", {}, "call-schema")],
+            ),
+            FakeResponse(
+                "response-2",
+                output=[FakeFunctionCall("run_sql", {"sql": bad_sql}, "call-bad-sql")],
+            ),
+            FakeResponse(
+                "response-3",
+                output=[FakeFunctionCall("run_sql", {"sql": fixed_sql}, "call-fixed-sql")],
+            ),
+            FakeResponse("response-4", output_text=fixed_sql),
+        ]
+    )
+    agent = DataAnalysisAgent(
+        row_limit=5,
+        use_openai=True,
+        openai_client=fake_client,
+    )
+
+    result = agent.analyze(
+        database_path=registry.resolve_path("chinook"),
+        database_name="chinook",
+        question="Show total sales by country",
+    )
+
+    tool_outputs = [
+        tool_output
+        for call in fake_client.responses.calls
+        if isinstance(call.get("input"), list)
+        for tool_output in call["input"]
+    ]
+    tool_output_text = "\n".join(item["output"] for item in tool_outputs)
+
+    assert result.sql_source == "openai"
+    assert result.row_count == 5
+    assert list(result.dataframe.columns) == ["country", "total_sales"]
+    assert "LIMIT 5" in result.sql
+    assert '"ok": false' in tool_output_text
+    assert "MissingColumn" in tool_output_text
+    assert '"ok": true' in tool_output_text
 
 
 # Verifies a supported offline sample question returns expected data.
