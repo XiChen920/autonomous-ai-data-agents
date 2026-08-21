@@ -223,6 +223,8 @@ def print_pipeline_result(result, preview_rows: int) -> None:
     if result.visualization is not None:
         print("\nVisualization:")
         print(f"Chart type: {result.visualization.chart_type}")
+        if result.visualization.recommendation_message:
+            print(f"Chart recommendation: {result.visualization.recommendation_message}")
         print(f"Chart saved to: {result.visualization.chart_path}")
         print(f"Data saved to: {result.visualization.data_path}")
 

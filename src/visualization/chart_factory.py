@@ -72,8 +72,8 @@ class ChartFactory:
 
         return selected_type, output
 
-    # Chooses the most suitable chart type for the DataFrame shape.
-    def choose_chart_type(self, dataframe: pd.DataFrame, requested_type: str = "auto") -> str:
+    # Recommends the most suitable chart type without considering a user override.
+    def recommend_chart_type(self, dataframe: pd.DataFrame) -> str:
         if dataframe.empty:
             return "table"
 
@@ -81,11 +81,32 @@ class ChartFactory:
         categorical_columns = self._categorical_columns(dataframe)
         date_columns = self._date_columns(dataframe)
 
+        if date_columns and numeric_columns:
+            return "line"
+
+        if categorical_columns and numeric_columns:
+            return "bar"
+
+        if len(numeric_columns) >= 2:
+            return "scatter"
+
+        if len(numeric_columns) == 1:
+            return "line"
+
+        return "table"
+
+    # Chooses the most suitable chart type for the DataFrame shape.
+    def choose_chart_type(self, dataframe: pd.DataFrame, requested_type: str = "auto") -> str:
+        if dataframe.empty:
+            return "table"
+
+        numeric_columns = self._numeric_columns(dataframe)
+
         if requested_type == "table":
             return "table"
 
-        if requested_type == "bar" and categorical_columns and numeric_columns:
-            return "bar"
+        if requested_type == "auto":
+            return self.recommend_chart_type(dataframe)
 
         if requested_type == "line" and numeric_columns:
             return "line"
@@ -93,16 +114,33 @@ class ChartFactory:
         if requested_type == "scatter" and numeric_columns:
             return "scatter"
 
-        if date_columns and numeric_columns:
-            return "line"
-
-        if len(numeric_columns) >= 2 and not categorical_columns:
-            return "scatter"
-
-        if categorical_columns and numeric_columns:
+        if requested_type == "bar" and numeric_columns:
             return "bar"
 
         return "table"
+
+    # Explains when a forced chart differs from the agent's recommendation.
+    def build_recommendation_message(
+        self,
+        dataframe: pd.DataFrame,
+        requested_type: str,
+        selected_type: str,
+        recommended_type: str,
+    ) -> str:
+        if requested_type == "auto" or requested_type == recommended_type:
+            return ""
+
+        if selected_type != requested_type:
+            return (
+                f"Requested chart '{requested_type}' could not be drawn safely, "
+                f"so the system rendered '{selected_type}'. Recommended chart: "
+                f"'{recommended_type}' because {self._recommendation_reason(dataframe, recommended_type)}"
+            )
+
+        return (
+            f"Requested chart '{requested_type}' was rendered. Recommended chart: "
+            f"'{recommended_type}' because {self._recommendation_reason(dataframe, recommended_type)}"
+        )
 
     # Applies shared company styling to a Matplotlib figure and axis.
     def _apply_base_style(self, figure, axis) -> None:
@@ -116,18 +154,32 @@ class ChartFactory:
 
     # Draws a horizontal bar chart for category-and-number results.
     def _draw_bar(self, axis, dataframe: pd.DataFrame, title: str) -> None:
-        category_column = self._categorical_columns(dataframe)[0]
+        categorical_columns = self._categorical_columns(dataframe)
         value_column = self._numeric_columns(dataframe)[0]
-        plot_data = dataframe[[category_column, value_column]].head(15).iloc[::-1]
+        columns = [value_column]
+        category_column = categorical_columns[0] if categorical_columns else None
+        if category_column is not None:
+            columns.insert(0, category_column)
+
+        plot_data = dataframe[columns].head(15).iloc[::-1]
+        labels = (
+            plot_data[category_column].astype(str)
+            if category_column is not None
+            else [str(index) for index in range(len(plot_data), 0, -1)]
+        )
 
         axis.barh(
-            plot_data[category_column].astype(str),
+            labels,
             plot_data[value_column],
             color=self.style.primary_color,
         )
         axis.set_title(title, loc="left", weight="bold")
         axis.set_xlabel(value_column.replace("_", " ").title())
-        axis.set_ylabel(category_column.replace("_", " ").title())
+        axis.set_ylabel(
+            category_column.replace("_", " ").title()
+            if category_column is not None
+            else "Row"
+        )
 
     # Draws a line chart for trends or ordered numeric results.
     def _draw_line(self, axis, dataframe: pd.DataFrame, title: str) -> None:
@@ -306,3 +358,29 @@ class ChartFactory:
 
         parsed = pd.to_datetime(dataframe[column], errors="coerce")
         return parsed.notna().mean() >= 0.7
+
+    # Gives a short reason for the recommended chart type.
+    def _recommendation_reason(self, dataframe: pd.DataFrame, recommended_type: str) -> str:
+        numeric_count = len(self._numeric_columns(dataframe))
+        categorical_count = len(self._categorical_columns(dataframe))
+        date_count = len(self._date_columns(dataframe))
+
+        if recommended_type == "line" and date_count:
+            return "the result contains a date/time column and numeric values."
+
+        if recommended_type == "line":
+            return "the result mainly contains one numeric series."
+
+        if recommended_type == "bar":
+            return "the result contains categorical labels and numeric values."
+
+        if recommended_type == "scatter":
+            return "the result contains multiple numeric columns."
+
+        if recommended_type == "table":
+            return (
+                "the result has no clear numeric chart structure "
+                f"({categorical_count} categorical columns, {numeric_count} numeric columns)."
+            )
+
+        return "it best matches the detected result shape."

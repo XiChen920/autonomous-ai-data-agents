@@ -552,6 +552,8 @@ def render_pipeline_result(result, analysis, visualization, preview_rows: int) -
     if visualization is not None:
         st.subheader("Visualization")
         st.image(str(visualization.chart_path), use_container_width=True)
+        if visualization.recommendation_message:
+            st.info(visualization.recommendation_message)
 
         with open(visualization.chart_path, "rb") as chart_file:
             st.download_button(

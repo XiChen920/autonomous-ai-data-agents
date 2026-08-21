@@ -18,6 +18,9 @@ class VisualizationResult:
     chart_type: str
     chart_path: Path
     data_path: Path
+    requested_chart_type: str = "auto"
+    recommended_chart_type: str = ""
+    recommendation_message: str = ""
 
 
 class DataVisualizationAgent:
@@ -45,6 +48,9 @@ class DataVisualizationAgent:
         chart_path = self.output_dir / f"{base_name}.png"
         data_path = self.output_dir / f"{base_name}.csv"
         title = self._build_title(analysis_result.question)
+        recommended_chart_type = self.chart_factory.recommend_chart_type(
+            analysis_result.dataframe
+        )
 
         selected_chart_type, saved_chart_path = self.chart_factory.create_chart(
             dataframe=analysis_result.dataframe,
@@ -52,12 +58,21 @@ class DataVisualizationAgent:
             title=title,
             chart_type=chart_type,
         )
+        recommendation_message = self.chart_factory.build_recommendation_message(
+            dataframe=analysis_result.dataframe,
+            requested_type=chart_type,
+            selected_type=selected_chart_type,
+            recommended_type=recommended_chart_type,
+        )
         analysis_result.dataframe.to_csv(data_path, index=False)
 
         return VisualizationResult(
             chart_type=selected_chart_type,
             chart_path=saved_chart_path,
             data_path=data_path,
+            requested_chart_type=chart_type,
+            recommended_chart_type=recommended_chart_type,
+            recommendation_message=recommendation_message,
         )
 
     # Builds a safe filename from database name and question text.

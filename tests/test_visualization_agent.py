@@ -30,6 +30,8 @@ def test_visualization_agent_creates_company_style_bar_chart(tmp_path: Path) -> 
     result = agent.visualize(analysis_result, chart_type="auto")
 
     assert result.chart_type == "bar"
+    assert result.recommended_chart_type == "bar"
+    assert result.recommendation_message == ""
     assert result.chart_path.exists()
     assert result.chart_path.stat().st_size > 0
     assert result.data_path.exists()
@@ -50,6 +52,8 @@ def test_visualization_agent_creates_table_for_empty_dataframe(tmp_path: Path) -
     result = agent.visualize(analysis_result)
 
     assert result.chart_type == "table"
+    assert result.recommended_chart_type == "table"
+    assert result.recommendation_message == ""
     assert result.chart_path.exists()
     assert result.chart_path.stat().st_size > 0
 
@@ -83,6 +87,36 @@ def test_visualization_agent_handles_forced_line_and_scatter_with_one_numeric_co
     assert scatter_result.chart_type == "scatter"
     assert scatter_result.chart_path.exists()
     assert scatter_result.chart_path.stat().st_size > 0
+
+
+# Verifies forced chart requests still render but return a better recommendation.
+def test_visualization_agent_recommends_better_chart_for_forced_mismatch(
+    tmp_path: Path,
+) -> None:
+    dataframe = pd.DataFrame(
+        {
+            "country": ["USA", "Canada", "France"],
+            "total_sales": [523.06, 303.96, 195.10],
+        }
+    )
+    analysis_result = AnalysisResult(
+        database_name="chinook",
+        question="Show total sales by country",
+        sql="SELECT ...",
+        summary="Example analysis",
+        dataframe=dataframe,
+        sql_source="test",
+    )
+    agent = DataVisualizationAgent(output_dir=tmp_path)
+
+    result = agent.visualize(analysis_result, chart_type="scatter")
+
+    assert result.chart_type == "scatter"
+    assert result.requested_chart_type == "scatter"
+    assert result.recommended_chart_type == "bar"
+    assert "Recommended chart" in result.recommendation_message
+    assert "'bar'" in result.recommendation_message
+    assert result.chart_path.exists()
 
 
 # Verifies the full two-agent pipeline returns both data and a chart.
